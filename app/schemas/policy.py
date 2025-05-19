@@ -30,8 +30,8 @@ class PolicyCategoryScoreList(BaseModel):
     categories: List[PolicyCategoryScore]
 
 class PolicyViolationContent(BaseModel):
-    policy_id: str
-    policy_title: str
+    policy_id: str #need to find a way to make this an enum of options from the policy data
+    policy_title: str #need to find a way to make this an enum of options from the policy data
     violated_content: str
     justification: str
     confidence: float
