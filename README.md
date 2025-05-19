@@ -1,6 +1,6 @@
-# Policy Checker API
+# PolicyKit
 
-A FastAPI-based service for checking job postings against policy violations.
+A FastAPI-based service for checking job postings against policy violations, with database-backed policy management.
 
 ## Features
 
@@ -9,6 +9,8 @@ A FastAPI-based service for checking job postings against policy violations.
 - Policy violation detection
 - Parallel policy investigations
 - Structured output with confidence scores
+- Database-backed policy management
+- Async database operations
 
 ## Setup
 
@@ -23,17 +25,30 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-3. Create a `.env` file with your OpenAI API key:
+3. Create a `.env` file with your configuration:
 ```
 OPENAI_API_KEY=your_api_key_here
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=policykit
+```
+
+4. Set up the database:
+```bash
+# Create the database
+createdb policykit
+
+# Run migrations
+alembic upgrade head
 ```
 
 ## Running the API
 
 Start the API server:
 ```bash
-cd app
-uvicorn main:app --reload
+uvicorn app.main:app --reload
 ```
 
 The API will be available at `http://localhost:8000`
@@ -70,14 +85,16 @@ app/
 │           └── policy_checker.py
 ├── core/
 │   ├── config.py
+│   ├── database.py
 │   └── prompts.py
-├── data/
-│   └── sample_policies.json
 ├── models/
+│   └── policy.py
 ├── schemas/
 │   └── policy.py
 ├── services/
 │   └── policy_checker.py
+├── migrations/
+│   └── versions/
 └── main.py
 ```
 
@@ -86,4 +103,18 @@ app/
 - The API is built with FastAPI
 - Uses Pydantic for data validation
 - OpenAI's GPT-4 for policy checking
-- Async/await for parallel processing 
+- Async/await for parallel processing
+- SQLAlchemy for database operations
+- Alembic for database migrations
+
+## Testing
+
+Run the tests:
+```bash
+pytest tests/
+```
+
+The test suite includes:
+- API endpoint tests
+- Policy violation detection tests
+- Database integration tests 

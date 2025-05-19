@@ -1,10 +1,7 @@
 """Policy checker for job postings using OpenAI's API."""
 
-import os
-import json
 import asyncio
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional
 import re
 from openai import AsyncOpenAI
 from app.core.config import settings
@@ -23,29 +20,22 @@ from app.core.prompts import (
     get_category_selection_instructions,
     get_policy_investigation_instructions
 )
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
+from app.models.policy import PolicyCategory, Policy
 
 class PolicyChecker:
-    def __init__(self, api_key: Optional[str] = None):
-        self.policies_data = self._load_policies()
+    def __init__(self, db: AsyncSession, api_key: Optional[str] = None):
+        self.db = db
         self.client = AsyncOpenAI(api_key=api_key)
     
-    def _load_policies(self) -> Dict:
-        """Load policies from JSON file."""
-        file_path = Path(__file__).parent.parent / "data" / "sample_policies.json"
-        print(f"Loading policies from: {file_path}")
-        try:
-            with open(file_path, 'r') as f:
-                return json.load(f)
-        except FileNotFoundError:
-            print(f"Error: Policies file not found at {file_path}")
-            raise
-        except json.JSONDecodeError as e:
-            print(f"Error: Invalid JSON in policies file: {e}")
-            raise
-        except Exception as e:
-            print(f"Error loading policies: {e}")
-            raise
-    
+    async def get_policy_categories(self):
+        result = await self.db.execute(
+            select(PolicyCategory).options(selectinload(PolicyCategory.policies))
+        )
+        return result.scalars().all()
+
     async def check_job_posting(self, 
                               job_description: str, 
                               image_path: Optional[str] = None) -> FinalOutput:
@@ -82,7 +72,10 @@ class PolicyChecker:
 
         # Step 2: Verify if it's a job posting
         verification = await self._verify_job_posting(job_description)
-        if not verification.is_job_posting or verification.confidence < settings.JOB_POSTING_CONFIDENCE_THRESHOLD:
+        
+        
+        #Has to be EXTREMELY confident that it is NOT a job posting to return an invalid violation here
+        if not verification.is_job_posting and verification.confidence > settings.JOB_POSTING_CONFIDENCE_THRESHOLD:
             return FinalOutput(
                 has_violations=True,
                 violations=[
@@ -104,6 +97,10 @@ class PolicyChecker:
             job_description, 
             categories_to_investigate
         )
+
+        print("--------------------------------")
+        print("investigation_results", investigation_results)
+        print("--------------------------------")
 
         # Step 5: Aggregate results
         all_violations = []
@@ -163,10 +160,14 @@ class PolicyChecker:
         return response.output_parsed
 
     async def _orchestrate_investigations(self, text: str) -> List[PolicyCategoryScore]:
-        category_descriptions = {
-            category: self.policies_data["categories"][category]["description"]
-            for category in self.policies_data["categories"]
-        }
+        # Fetch categories and their descriptions from the DB
+        categories = await self.get_policy_categories()
+        category_descriptions = {cat.name: cat.description for cat in categories}
+        
+        print("--------------------------------")
+        print("category_descriptions", category_descriptions)
+        print("--------------------------------")
+        
         response = await self.client.responses.parse(
             model="gpt-4o-2024-08-06",
             input=[
@@ -188,6 +189,11 @@ class PolicyChecker:
         top_3_categories = sorted(categories, key=lambda x: x.confidence, reverse=True)[:settings.MAX_PARALLEL_INVESTIGATIONS]
         #only investigate categories that are above the threshold
         categories_to_investigate = [category for category in top_3_categories if category.confidence > settings.POLICY_INVESTIGATION_THRESHOLD]
+        
+        print("--------------------------------")
+        print("categories_to_investigate", categories_to_investigate)
+        print("--------------------------------")
+        
         tasks = [
             self._investigate_category(text, category)
             for category in categories_to_investigate
@@ -265,18 +271,26 @@ class PolicyChecker:
         text: str, 
         category: PolicyCategoryScore
     ) -> PolicyInvestigationResult:
-        """Investigate a specific policy category using structured output."""
-        try:
-            category_data = self.policies_data["categories"][category.category]
-            response = await self.client.responses.parse(
-                model="gpt-4o-2024-08-06",
-                input=[
-                    {"role": "system", "content": get_policy_investigation_instructions(category.category, category_data)},
-                    {"role": "user", "content": text}
-                ],
-                text_format=PolicyInvestigationResult
-            )
-            return response.output_parsed
-        except Exception as e:
-            print(f"Error investigating category {category.category}: {str(e)}")
-            raise 
+        # Fetch category and its policies from the DB
+        db_category = await self.db.execute(
+            select(PolicyCategory).options(selectinload(PolicyCategory.policies)).where(PolicyCategory.name == category.category)
+        )
+        db_category = db_category.scalars().first()
+        if not db_category:
+            raise ValueError(f"Category {category.category} not found in DB")
+        category_data = {
+            "description": db_category.description,
+            "policies": [
+                {"title": p.title, "description": p.description, "extra_metadata": p.extra_metadata}
+                for p in db_category.policies
+            ]
+        }
+        response = await self.client.responses.parse(
+            model="gpt-4o-2024-08-06",
+            input=[
+                {"role": "system", "content": get_policy_investigation_instructions(category.category, category_data)},
+                {"role": "user", "content": text}
+            ],
+            text_format=PolicyInvestigationResult
+        )
+        return response.output_parsed 

@@ -1,37 +1,55 @@
-from typing import List
+"""Application configuration settings."""
+
+from typing import List, Dict, Any
 from pydantic_settings import BaseSettings
 from pydantic import AnyHttpUrl
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "Policy Checker API"
+    """Application settings."""
+    
+    # API Settings
     API_V1_STR: str = "/api/v1"
+    PROJECT_NAME: str = "PolicyKit"
     
     # CORS Configuration
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
     
-    # OpenAI Configuration
+    # OpenAI Settings
     OPENAI_API_KEY: str
     
-    # Policy Checker Configuration
-    JOB_POSTING_CONFIDENCE_THRESHOLD: float = 0.7
+    # Database Settings
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = "postgres"
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: str = "5432"
+    POSTGRES_DB: str = "policykit"
+    DB_ECHO_LOG: bool = False
+    
+    @property
+    def DATABASE_URL(self) -> str:
+        """Get the database URL."""
+        return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+    
+    # Policy Checker Settings
+    JOB_POSTING_CONFIDENCE_THRESHOLD: float = 0.9
     POLICY_INVESTIGATION_THRESHOLD: float = 0.5
     MAX_PARALLEL_INVESTIGATIONS: int = 3
     LLM_INVESTIGATION_TIMEOUT: int = 30
     
     # Injection Patterns
-    INJECTION_PATTERNS: List[dict] = [
+    INJECTION_PATTERNS: List[Dict[str, Any]] = [
         {
             "pattern": "ignore previous instructions",
-            "description": "Attempt to ignore previous instructions"
+            "description": "Attempt to override system instructions"
         },
         {
-            "pattern": "you are now",
-            "description": "Attempt to change AI behavior"
+            "pattern": "system prompt",
+            "description": "Attempt to access system prompt"
         }
     ]
     
     class Config:
-        case_sensitive = True
         env_file = ".env"
+        case_sensitive = True
 
 settings = Settings() 
