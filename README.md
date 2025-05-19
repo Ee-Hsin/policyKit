@@ -44,6 +44,100 @@ createdb policykit
 alembic upgrade head
 ```
 
+## Policy Structure
+
+The system uses a hierarchical structure for policies:
+
+1. **Policy Categories**: Top-level groupings of related policies
+   - Each category has a name and description
+   - Categories are used to organize policies by type (e.g., "Discrimination", "Legal", "Compensation")
+
+2. **Policies**: Individual rules within each category
+   - Each policy has a title and description
+   - Policies can have additional metadata in JSON format
+   - Policies are linked to their parent category
+
+### Example Policy Structure
+
+```python
+# Example category
+discrimination_category = {
+    "name": "Discrimination",
+    "description": "Policies related to discrimination, bias, and equal opportunity",
+    "policies": [
+        {
+            "title": "No Age Discrimination",
+            "description": "Job postings must not discriminate based on age",
+            "extra_metadata": {
+                "severity": "high",
+                "examples": ["must be under 30", "recent graduate only"]
+            }
+        },
+        {
+            "title": "No Gender Discrimination",
+            "description": "Job postings must not discriminate based on gender",
+            "extra_metadata": {
+                "severity": "high",
+                "examples": ["male candidates only", "female preferred"]
+            }
+        }
+    ]
+}
+```
+
+### Populating the Database
+
+You can populate the database with policies using SQLAlchemy. Here's an example script:
+
+```python
+from app.core.database import async_session_factory
+from app.models.policy import PolicyCategory, Policy
+
+async def populate_policies():
+    async with async_session_factory() as session:
+        # Create a category
+        discrimination = PolicyCategory(
+            name="Discrimination",
+            description="Policies related to discrimination, bias, and equal opportunity"
+        )
+        session.add(discrimination)
+        await session.flush()  # Get the category ID
+
+        # Add policies to the category
+        policies = [
+            Policy(
+                category_id=discrimination.id,
+                title="No Age Discrimination",
+                description="Job postings must not discriminate based on age",
+                extra_metadata={
+                    "severity": "high",
+                    "examples": ["must be under 30", "recent graduate only"]
+                }
+            ),
+            Policy(
+                category_id=discrimination.id,
+                title="No Gender Discrimination",
+                description="Job postings must not discriminate based on gender",
+                extra_metadata={
+                    "severity": "high",
+                    "examples": ["male candidates only", "female preferred"]
+                }
+            )
+        ]
+        session.add_all(policies)
+        await session.commit()
+
+# Run the population script
+import asyncio
+asyncio.run(populate_policies())
+```
+
+Save this script as `scripts/populate_policies.py` and run it after setting up your database:
+
+```bash
+python scripts/populate_policies.py
+```
+
 ## Running the API
 
 Start the API server:
