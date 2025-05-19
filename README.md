@@ -4,13 +4,14 @@ A FastAPI-based service for checking job postings against policy violations, wit
 
 ## Features
 
-- Job posting verification
+- Job posting verification with confidence scoring
 - Security checks for prompt injection
-- Policy violation detection
-- Parallel policy investigations
+- Policy violation detection with parallel processing
+- Category-based policy investigation
 - Structured output with confidence scores
 - Database-backed policy management
 - Async database operations
+- Parallel policy investigations with timeout handling
 
 ## Setup
 
@@ -49,13 +50,15 @@ alembic upgrade head
 The system uses a hierarchical structure for policies:
 
 1. **Policy Categories**: Top-level groupings of related policies
-   - Each category has a name and description
+   - Each category has a name, ID, and description
    - Categories are used to organize policies by type (e.g., "Discrimination", "Legal", "Compensation")
+   - Categories are scored for relevance to the job posting
 
 2. **Policies**: Individual rules within each category
-   - Each policy has a title and description
+   - Each policy has a title, description, and ID
    - Policies can have additional metadata in JSON format
    - Policies are linked to their parent category
+   - Policies can include examples of violations
 
 ### Example Policy Structure
 
@@ -69,7 +72,6 @@ discrimination_category = {
             "title": "No Age Discrimination",
             "description": "Job postings must not discriminate based on age",
             "extra_metadata": {
-                "severity": "high",
                 "examples": ["must be under 30", "recent graduate only"]
             }
         },
@@ -77,7 +79,6 @@ discrimination_category = {
             "title": "No Gender Discrimination",
             "description": "Job postings must not discriminate based on gender",
             "extra_metadata": {
-                "severity": "high",
                 "examples": ["male candidates only", "female preferred"]
             }
         }
@@ -110,7 +111,6 @@ async def populate_policies():
                 title="No Age Discrimination",
                 description="Job postings must not discriminate based on age",
                 extra_metadata={
-                    "severity": "high",
                     "examples": ["must be under 30", "recent graduate only"]
                 }
             ),
@@ -119,7 +119,6 @@ async def populate_policies():
                 title="No Gender Discrimination",
                 description="Job postings must not discriminate based on gender",
                 extra_metadata={
-                    "severity": "high",
                     "examples": ["male candidates only", "female preferred"]
                 }
             )
@@ -166,6 +165,21 @@ Request body:
 }
 ```
 
+Response:
+```json
+{
+    "has_violations": boolean,
+    "violations": [
+        {
+            "category": "string",
+            "policy": ["string"],
+            "reasoning": "string",
+            "content": "string"
+        }
+    ]
+}
+```
+
 ### GET /api/v1/health
 Health check endpoint.
 
@@ -200,6 +214,15 @@ app/
 - Async/await for parallel processing
 - SQLAlchemy for database operations
 - Alembic for database migrations
+
+## Configuration Settings
+
+Key configuration settings in `.env`:
+- `JOB_POSTING_CONFIDENCE_THRESHOLD`: 0.9 (Confidence required to reject non-job postings)
+- `POLICY_INVESTIGATION_CONFIDENCE_THRESHOLD`: 0.7 (Minimum confidence to investigate a category)
+- `FINAL_OUTPUT_CONFIDENCE_THRESHOLD`: 0.85 (Minimum confidence to report a violation)
+- `MAX_PARALLEL_INVESTIGATIONS`: 3 (Maximum number of parallel category investigations)
+- `LLM_INVESTIGATION_TIMEOUT`: 30 (Timeout in seconds for LLM investigations)
 
 ## Testing
 

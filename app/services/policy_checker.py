@@ -85,17 +85,17 @@ class PolicyChecker:
             category_names.add(cat.name)
             category_ids.add(cat.id)
             
-        print("--------------------------------")
-        print("category_names", category_names)
-        print("--------------------------------")
-        print("category_ids", category_ids)
-        print("--------------------------------")
+        #print("--------------------------------")
+        #print("category_names", category_names)
+        #print("--------------------------------")
+        #print("category_ids", category_ids)
+        #print("--------------------------------")
         
         DynamicPolicyCategoryScoreList = create_policy_category_score_list_model(category_names, category_ids)
 
-        print("--------------------------------")
-        print("DynamicPolicyCategoryScoreList", DynamicPolicyCategoryScoreList)
-        print("--------------------------------")
+        #print("--------------------------------")
+        #print("DynamicPolicyCategoryScoreList", DynamicPolicyCategoryScoreList)
+        #print("--------------------------------")
 
         # Step 3: Orchestrate policy investigations and returns a DynamicPolicyCategoryScoreList
         categories_to_investigate = await self._orchestrate_investigations(
@@ -108,9 +108,9 @@ class PolicyChecker:
         # first only investigate the top 3 categories that all must have a confidence score above the threshold
         categories_to_investigate = [cat for cat in categories_to_investigate if cat.confidence > settings.POLICY_INVESTIGATION_CONFIDENCE_THRESHOLD][:3]
         
-        print("--------------------------------")
-        print("categories to investigate", categories_to_investigate)
-        print("--------------------------------")
+        #print("--------------------------------")
+        #print("categories to investigate", categories_to_investigate)
+        #print("--------------------------------")
         
         #Now we get the policies for each category
         #query the db for the policies
@@ -126,9 +126,9 @@ class PolicyChecker:
             })
             
         #Now we have a list of policies to investigate
-        print("--------------------------------")
-        print("list_of_categories_with_policies", list_of_categories_with_policies)
-        print("--------------------------------")
+        #print("--------------------------------")
+        #print("list_of_categories_with_policies", list_of_categories_with_policies)
+        #print("--------------------------------")
         
         investigation_results = await self._investigate_categories(job_description,list_of_categories_with_policies)
         
