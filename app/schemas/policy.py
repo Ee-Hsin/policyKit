@@ -1,73 +1,77 @@
-from typing import List, Optional, Dict, Any, Set
-from pydantic import BaseModel, Field, create_model, validator
-from enum import Enum
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.policy import PolicyCategory
+from typing import List, Optional, Any, Set, Type, Union
+from pydantic import BaseModel, create_model, validator
 
-def create_policy_category_score_list_model(categories: Set[str]) -> type[BaseModel]:
-    """Create a dynamic PolicyCategoryScoreList model with validation."""
+def create_policy_category_score_list_model(category_names: Set[str], category_ids: Set[int]) -> Type[BaseModel]:
+    """Create dynamic PolicyCategoryScoreList model with validation."""
     # Create the score model with a custom validator
     class DynamicPolicyCategoryScore(BaseModel):
         category: str
+        category_id: int
         confidence: float
         reasoning: str
         
         @validator('category')
         def validate_category(cls, v, values, **kwargs):
-            if v not in categories:
-                raise ValueError(f"Category must be one of: {', '.join(categories)}")
+            if v not in category_names:
+                raise ValueError(f"Category must be one of: {', '.join(category_names)}")
+            return v
+        
+        @validator('category_id')
+        def validate_category_id(cls, v, values, **kwargs):
+            if v not in category_ids:
+                raise ValueError(f"Category ID must be one of: {', '.join(str(id) for id in category_ids)}")
             return v
     
     # Create the list model
-    return create_model(
+    DynamicPolicyCategoryScoreList = create_model(
         'DynamicPolicyCategoryScoreList',
         categories=(List[DynamicPolicyCategoryScore], ...),
         __base__=BaseModel
     )
+    
+    return DynamicPolicyCategoryScoreList
 
 class JobPostingRequest(BaseModel):
+    """Request body for job posting verification, this is what is passed into check_job_posting"""
     job_description: str
     image_path: Optional[str] = None
-
-class SecurityIssue(BaseModel):
-    type: str
-    pattern: Optional[str] = None
-    description: str
+    
+class SafetyKitViolation(BaseModel):
+    """A violation model specifically for safetykit (for prompt injections and not job postings)
+    This is used in the violations list in the FinalOutput model."""
+    category: str
+    confidence: float
+    reasoning: str
+    
+class StandardViolation(BaseModel):
+    """Standard violation model. This is used in the violations list in the FinalOutput model."""
+    category: str
+    policy: list[str]
+    reasoning: str
+    content: str
+class FinalOutput(BaseModel):
+    """The final Output of the API, returned by check_job_posting"""
+    has_violations: bool
+    violations: List[Union[StandardViolation, SafetyKitViolation]]
+    metadata: Optional[dict] = None 
 
 class SecurityCheck(BaseModel):
+    """Security check model. This is returned from the _check_security method."""
     is_safe: bool
     confidence: float
-    security_issues: Optional[List[SecurityIssue]] = None
     reasoning: str
 
 class JobPostingVerification(BaseModel):
+    """Job posting verification model. This is returned from the _verify_job_posting method."""
     is_job_posting: bool
     confidence: float
     reasoning: str
-
-# These will be replaced with dynamic models at runtime
-class PolicyCategoryScore(BaseModel):
-    category: str
+    
+class CategoryInvestigation(BaseModel):
+    """Category investigation model. This is returned from the _investigate_individual_category method.
+    We identify a list of policies from that category that are violated in the job posting."""
+    category_id: int
+    policies_violated_ids : list[int]
     confidence: float
     reasoning: str
-
-class PolicyCategoryScoreList(BaseModel):
-    categories: List[PolicyCategoryScore]
-
-class PolicyViolationContent(BaseModel):
-    policy_id: str #need to find a way to make this an enum of options from the policy data
-    policy_title: str #need to find a way to make this an enum of options from the policy data
-    violated_content: str
-    justification: str
-    confidence: float
-
-class PolicyInvestigationResult(BaseModel):
-    category: str
-    violations: List[PolicyViolationContent]
-    reasoning: str
-
-class FinalOutput(BaseModel):
-    has_violations: bool
-    violations: List[PolicyViolationContent]
-    metadata: Optional[dict] = None 
+    content: str
