@@ -7,14 +7,14 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import re
 from openai import AsyncOpenAI
-from src.config import (
+from config import (
     JOB_POSTING_CONFIDENCE_THRESHOLD,
     POLICY_INVESTIGATION_THRESHOLD,
     MAX_PARALLEL_INVESTIGATIONS,
     LLM_INVESTIGATION_TIMEOUT,
     INJECTION_PATTERNS
 )
-from src.models import (
+from models import (
     SecurityCheck,
     SecurityIssue,
     JobPostingVerification,
@@ -25,7 +25,7 @@ from src.models import (
     FinalOutput,
     PolicyCategory
 )
-from src.prompts import (
+from prompts import (
     get_job_posting_instructions,
     get_category_selection_instructions,
     get_policy_investigation_instructions
