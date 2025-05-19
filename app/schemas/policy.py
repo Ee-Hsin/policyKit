@@ -1,5 +1,30 @@
-from typing import List, Optional
-from pydantic import BaseModel
+from typing import List, Optional, Dict, Any, Set
+from pydantic import BaseModel, Field, create_model, validator
+from enum import Enum
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.models.policy import PolicyCategory
+
+def create_policy_category_score_list_model(categories: Set[str]) -> type[BaseModel]:
+    """Create a dynamic PolicyCategoryScoreList model with validation."""
+    # Create the score model with a custom validator
+    class DynamicPolicyCategoryScore(BaseModel):
+        category: str
+        confidence: float
+        reasoning: str
+        
+        @validator('category')
+        def validate_category(cls, v, values, **kwargs):
+            if v not in categories:
+                raise ValueError(f"Category must be one of: {', '.join(categories)}")
+            return v
+    
+    # Create the list model
+    return create_model(
+        'DynamicPolicyCategoryScoreList',
+        categories=(List[DynamicPolicyCategoryScore], ...),
+        __base__=BaseModel
+    )
 
 class JobPostingRequest(BaseModel):
     job_description: str
@@ -21,6 +46,7 @@ class JobPostingVerification(BaseModel):
     confidence: float
     reasoning: str
 
+# These will be replaced with dynamic models at runtime
 class PolicyCategoryScore(BaseModel):
     category: str
     confidence: float

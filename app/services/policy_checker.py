@@ -1,7 +1,7 @@
 """Policy checker for job postings using OpenAI's API."""
 
 import asyncio
-from typing import List, Optional
+from typing import List, Optional, Any
 import re
 from openai import AsyncOpenAI
 from app.core.config import settings
@@ -10,10 +10,10 @@ from app.schemas.policy import (
     SecurityIssue,
     JobPostingVerification,
     PolicyCategoryScore,
-    PolicyCategoryScoreList,
     PolicyViolationContent,
     PolicyInvestigationResult,
-    FinalOutput
+    FinalOutput,
+    create_policy_category_score_list_model,
 )
 from app.core.prompts import (
     get_job_posting_instructions,
@@ -91,6 +91,8 @@ class PolicyChecker:
 
         # Step 3: Orchestrate policy investigations
         categories_to_investigate = await self._orchestrate_investigations(job_description)
+        
+        
 
         # Step 4: Run parallel investigations
         investigation_results = await self._run_parallel_investigations(
@@ -123,6 +125,10 @@ class PolicyChecker:
         injection_issues = []
         text_lower = text.lower()
         
+        
+        # TODOWe can change this to an LLM call to check for injection patterns
+        # with a list of patterns
+        # and a confidence score
         for pattern in settings.INJECTION_PATTERNS:
             if pattern["pattern"] in text_lower:
                 injection_issues.append(SecurityIssue(
@@ -159,10 +165,22 @@ class PolicyChecker:
         )
         return response.output_parsed
 
-    async def _orchestrate_investigations(self, text: str) -> List[PolicyCategoryScore]:
+    #ORchestrator LLM that takes in every category and their brief descriptions, then
+    #decides which categories to investigate
+    async def _orchestrate_investigations(self, text: str) -> List[Any]:
         # Fetch categories and their descriptions from the DB
         categories = await self.get_policy_categories()
-        category_descriptions = {cat.name: cat.description for cat in categories}
+        category_names = {cat.name for cat in categories}
+        category_descriptions = [
+            {
+                "category_name": cat.name,
+                "category_description": cat.description
+            }
+            for cat in categories
+        ]
+        
+        # Create the dynamic model for validation
+        DynamicPolicyCategoryScoreList = create_policy_category_score_list_model(category_names)
         
         print("--------------------------------")
         print("category_descriptions", category_descriptions)
@@ -174,8 +192,13 @@ class PolicyChecker:
                 {"role": "system", "content": get_category_selection_instructions(category_descriptions)},
                 {"role": "user", "content": text}
             ],
-            text_format=PolicyCategoryScoreList
+            text_format=DynamicPolicyCategoryScoreList
         )
+        
+        print("--------------------------------")
+        print("categories to investigate", response.output_parsed.categories)
+        print("--------------------------------")
+        
         return response.output_parsed.categories
 
     async def _run_parallel_investigations(

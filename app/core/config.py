@@ -45,6 +45,38 @@ class Settings(BaseSettings):
         {
             "pattern": "system prompt",
             "description": "Attempt to access system prompt"
+        },
+        {
+            "pattern": "disregard all prior",
+            "description": "Attempt to override system behavior"
+        },
+        {
+            "pattern": "forget your previous",
+            "description": "Attempt to reset system state"
+        },
+        {
+            "pattern": "you are now",
+            "description": "Attempt to change system identity"
+        },
+        {
+            "pattern": "bypass security",
+            "description": "Attempt to circumvent security controls"
+        },
+        {
+            "pattern": "reveal your training",
+            "description": "Attempt to extract system information"
+        },
+        {
+            "pattern": "let's play a game",
+            "description": "Common social engineering pattern"
+        },
+        {
+            "pattern": "pretend to be",
+            "description": "Attempt to change system behavior"
+        },
+        {
+            "pattern": "do not check",
+            "description": "Attempt to bypass validation"
         }
     ]
     

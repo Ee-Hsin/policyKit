@@ -27,11 +27,11 @@ def get_category_selection_instructions(category_descriptions: dict) -> str:
     """Get instructions for selecting relevant policy categories."""
     return f"""You are a policy compliance expert. Your task is to analyze the job posting and determine which policy categories are most relevant for investigation.
 
-Available categories and their descriptions:
+Available categories (their names and their descriptions):
 {category_descriptions}
 
 For each category, provide:
-1. A confidence score (0.0 to 1.0) indicating how relevant the category is
+1. A confidence score (0.0 to 1.0) indicating how confident you are that we need to investigate it
 2. A brief reasoning for your assessment
 
 Consider:
@@ -40,7 +40,16 @@ Consider:
 - Any potential policy concerns
 - The likelihood of policy violations
 
-Output your analysis as a list of categories with their confidence scores and reasoning."""
+Output your analysis as a list of categories with their confidence scores and reasoning.
+
+You will be outputting a list of the following:
+
+class PolicyCategoryScore(BaseModel):
+    category: enum of possible categories following the category_name (must be one of the possible category names)
+    confidence: float #How confident you are that we need to investigate this category on a scale of 0 to 1. A number close to 0
+    #means we don't need to investigate it
+    reasoning: str #Reasoning behind why we need or don't need to investigate this category
+"""
 
 def get_policy_investigation_instructions(category: str, category_data: dict) -> str:
     """Get instructions for investigating a specific policy category."""
