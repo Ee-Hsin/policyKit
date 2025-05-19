@@ -1,0 +1,12 @@
+# Project dependencies
+# Add your project dependencies here, for example:
+# requests==2.31.0
+# python-dotenv==1.0.0
+openai>=1.12.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0  # For data validation
+pillow>=10.0.0   # For image processing
+python-multipart>=0.0.6  # For handling multipart form data (will be needed for API)
+fastapi>=0.100.0  # For future API implementation
+uvicorn>=0.22.0   # For future API server
+pytest>=7.0.0    # For testing 

@@ -1,0 +1,209 @@
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36" version="27.0.6">
+  <diagram name="Page-1" id="Sq1QqRHBhEGgmif4Jlx_">
+    <mxGraphModel grid="1" page="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="_qnc87mY97x_xuCPpzBz-13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="_qnc87mY97x_xuCPpzBz-2" target="_qnc87mY97x_xuCPpzBz-11">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-2" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=light-dark(#FFFFFF,#FF8000);" vertex="1" parent="1">
+          <mxGeometry x="-80" y="200" width="130" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-3" value="Job Posting" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="-190" y="280" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-4" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=light-dark(#FFFFFF,#FF8000);" vertex="1" parent="1">
+          <mxGeometry x="-80" y="310" width="120" height="210" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-5" value="" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="_qnc87mY97x_xuCPpzBz-3" target="_qnc87mY97x_xuCPpzBz-2">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="140" y="400" as="sourcePoint" />
+            <mxPoint x="190" y="350" as="targetPoint" />
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-6" value="" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="_qnc87mY97x_xuCPpzBz-3" target="_qnc87mY97x_xuCPpzBz-4">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="140" y="400" as="sourcePoint" />
+            <mxPoint x="190" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-7" value="Is it a Job Posting? (Give Confidence Score)" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="-45" y="222.5" width="60" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-8" value="Check for rule-based injections, only if clear, escalate to LLM calls to check if there are prompt injections and malicious activities (Give confidence score too)" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="-70" y="385" width="100" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-10" value="" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" parent="1" source="_qnc87mY97x_xuCPpzBz-4" target="_qnc87mY97x_xuCPpzBz-11">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="140" y="400" as="sourcePoint" />
+            <mxPoint x="120" y="300" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-11" value="" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;" vertex="1" parent="1">
+          <mxGeometry x="110" y="250" width="150" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-12" value="Gate (ensure both job posting + no prompt injections), otherwise flag accordingly" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="150" y="310" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-15" value="" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" parent="1" source="_qnc87mY97x_xuCPpzBz-11">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="430" y="380" as="sourcePoint" />
+            <mxPoint x="350" y="330" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-16" value="" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;" vertex="1" parent="1">
+          <mxGeometry x="370" y="50" width="140" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-17" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="_qnc87mY97x_xuCPpzBz-16" target="_qnc87mY97x_xuCPpzBz-19">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="430" y="380" as="sourcePoint" />
+            <mxPoint x="410" y="300" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-18" value="Policy Category and Brief description of each category&amp;nbsp;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="410" y="120" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-49" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="_qnc87mY97x_xuCPpzBz-19" target="_qnc87mY97x_xuCPpzBz-46">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="450" y="720" />
+              <mxPoint x="1430" y="720" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-19" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=light-dark(#FFFFFF,#FF8000);" vertex="1" parent="1">
+          <mxGeometry x="350" y="300" width="200" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-20" value="(Orchestrator)&lt;br&gt;Checks through all the Policy Categories and based on their descriptions, assign a confidence score that we need to investigate in a certain policy area (return array of policy areas to investigate and the confidence score that we need to investigate with)" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="367.5" y="340" width="165" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-27" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=2;rounded=0;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="550" y="370" as="sourcePoint" />
+            <mxPoint x="790" y="370" as="targetPoint" />
+            <Array as="points">
+              <mxPoint x="740" y="370" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-28" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=2;rounded=0;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="550" y="400" as="sourcePoint" />
+            <mxPoint x="740" y="490" as="targetPoint" />
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-29" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=2;rounded=0;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="550" y="332.5" as="sourcePoint" />
+            <mxPoint x="770" y="290" as="targetPoint" />
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-30" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fa6800;fontColor=#000000;strokeColor=#C73500;" vertex="1" parent="1">
+          <mxGeometry x="780" y="235" width="130" height="87.5" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-31" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fa6800;fontColor=#000000;strokeColor=#C73500;" vertex="1" parent="1">
+          <mxGeometry x="790" y="342.5" width="130" height="87.5" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-32" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fa6800;fontColor=#000000;strokeColor=#C73500;" vertex="1" parent="1">
+          <mxGeometry x="740" y="463" width="130" height="87.5" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-33" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=2;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" parent="1" source="_qnc87mY97x_xuCPpzBz-30">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="1090" y="382.5" as="sourcePoint" />
+            <mxPoint x="1060" y="330" as="targetPoint" />
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-34" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=2;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" parent="1" source="_qnc87mY97x_xuCPpzBz-31">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="1040" y="562.5" as="sourcePoint" />
+            <mxPoint x="1070" y="386" as="targetPoint" />
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-35" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=2;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" parent="1" source="_qnc87mY97x_xuCPpzBz-32">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="1060" y="540" as="sourcePoint" />
+            <mxPoint x="1070" y="430" as="targetPoint" />
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-36" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fa6800;fontColor=#000000;strokeColor=#C73500;" vertex="1" parent="1">
+          <mxGeometry x="1070" y="310" width="190" height="137.5" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-37" value="Aggregator (Collects all Policy Flags and their justifications, or None if no policy violations after investigation)" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1090" y="352.5" width="150" height="67.5" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-38" value="Dynamically call LLMs in Parallel to investigate each policy area" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;strokeColor=light-dark(transparent,#FFFF00);" vertex="1" parent="1">
+          <mxGeometry x="750" y="160" width="180" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-39" value="Investigate Policy Area 1" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="815" y="257.5" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-40" value="Investigate Policy Area 2" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="825" y="370" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-41" value="Investigate Policy Area 3" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="775" y="491.75" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-42" value="All these &quot;investigative&quot; LLMs must provide specific policies flagged if they identify any, as well as the specific content they found to be in violation, as well as a justification of why that content violates that policy number" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fillColor=light-dark(transparent,#CCCC00);" vertex="1" parent="1">
+          <mxGeometry x="725" y="580" width="230" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-50" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" target="_qnc87mY97x_xuCPpzBz-30">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1060" y="190" as="sourcePoint" />
+            <Array as="points">
+              <mxPoint x="1060" y="279" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-51" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.145;exitY=1;exitDx=0;exitDy=-4.35;exitPerimeter=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1040.3000000000002" y="189.99999999999997" as="sourcePoint" />
+            <mxPoint x="950" y="390.6" as="targetPoint" />
+            <Array as="points">
+              <mxPoint x="1020" y="190.35" />
+              <mxPoint x="1020" y="390.35" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-52" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.145;exitY=1;exitDx=0;exitDy=-4.35;exitPerimeter=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="_qnc87mY97x_xuCPpzBz-43" target="_qnc87mY97x_xuCPpzBz-32">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1040" y="186" />
+              <mxPoint x="1040" y="507" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-43" value="" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;" vertex="1" parent="1">
+          <mxGeometry x="990" y="40" width="140" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-44" value="Load all the Policies of that specific category into context windows of specific LLM investigating" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1005" y="110" width="110" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-45" value="Users should provide a description of every policy category to us, but when policies are uploaded we can have an LLM summarize each category and give it a description too&amp;nbsp;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="532.5" y="60" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-46" value="" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="1370" y="352.5" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-47" value="" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="_qnc87mY97x_xuCPpzBz-36" target="_qnc87mY97x_xuCPpzBz-46">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="930" y="440" as="sourcePoint" />
+            <mxPoint x="980" y="390" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-48" value="Output to user" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="367.5" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="_qnc87mY97x_xuCPpzBz-54" value="If nothing to flag (No investigation needed)" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="460" y="510" width="80" height="70" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
