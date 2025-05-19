@@ -7,14 +7,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import re
 from openai import AsyncOpenAI
-from config import (
-    JOB_POSTING_CONFIDENCE_THRESHOLD,
-    POLICY_INVESTIGATION_THRESHOLD,
-    MAX_PARALLEL_INVESTIGATIONS,
-    LLM_INVESTIGATION_TIMEOUT,
-    INJECTION_PATTERNS
-)
-from models import (
+from app.core.config import settings
+from app.schemas.policy import (
     SecurityCheck,
     SecurityIssue,
     JobPostingVerification,
@@ -22,23 +16,22 @@ from models import (
     PolicyCategoryScoreList,
     PolicyViolationContent,
     PolicyInvestigationResult,
-    FinalOutput,
-    PolicyCategory
+    FinalOutput
 )
-from prompts import (
+from app.core.prompts import (
     get_job_posting_instructions,
     get_category_selection_instructions,
     get_policy_investigation_instructions
 )
 
 class PolicyChecker:
-    def __init__(self, policies_file: str = "sample_policies.json", api_key: Optional[str] = None):
-        self.policies_data = self._load_policies(policies_file)
+    def __init__(self, api_key: Optional[str] = None):
+        self.policies_data = self._load_policies()
         self.client = AsyncOpenAI(api_key=api_key)
     
-    def _load_policies(self, policies_file: str) -> Dict:
+    def _load_policies(self) -> Dict:
         """Load policies from JSON file."""
-        file_path = Path(__file__).parent / policies_file
+        file_path = Path(__file__).parent.parent / "data" / "sample_policies.json"
         print(f"Loading policies from: {file_path}")
         try:
             with open(file_path, 'r') as f:
@@ -86,12 +79,10 @@ class PolicyChecker:
                     "security_confidence": security_check.confidence
                 }
             )
-        print("--------------------------------")
-        print("security_check", security_check)
-        print("--------------------------------")
+
         # Step 2: Verify if it's a job posting
         verification = await self._verify_job_posting(job_description)
-        if not verification.is_job_posting or verification.confidence < JOB_POSTING_CONFIDENCE_THRESHOLD:
+        if not verification.is_job_posting or verification.confidence < settings.JOB_POSTING_CONFIDENCE_THRESHOLD:
             return FinalOutput(
                 has_violations=True,
                 violations=[
@@ -104,30 +95,20 @@ class PolicyChecker:
                     )
                 ]
             )
-        print("--------------------------------")
-        print("verification", verification)
-        print("--------------------------------")
+
         # Step 3: Orchestrate policy investigations
         categories_to_investigate = await self._orchestrate_investigations(job_description)
-        print("--------------------------------")
-        print("categories_to_investigate", categories_to_investigate)
-        print("--------------------------------")
+
         # Step 4: Run parallel investigations
         investigation_results = await self._run_parallel_investigations(
             job_description, 
             categories_to_investigate
         )
-        print("--------------------------------")
-        print("investigation_results", investigation_results)
-        print("--------------------------------")
+
         # Step 5: Aggregate results
         all_violations = []
         for result in investigation_results:
             all_violations.extend(result.violations)
-            
-        print("--------------------------------")
-        print("all_violations", all_violations)
-        print("--------------------------------")
         
         # Step 6: Create final output with validation
         return FinalOutput(
@@ -135,7 +116,7 @@ class PolicyChecker:
             violations=all_violations,
             metadata={
                 "total_categories_checked": len(categories_to_investigate),
-                "categories_investigated": [r.category.value for r in investigation_results]
+                "categories_investigated": [r.category for r in investigation_results]
             }
         )
 
@@ -145,7 +126,7 @@ class PolicyChecker:
         injection_issues = []
         text_lower = text.lower()
         
-        for pattern in INJECTION_PATTERNS:
+        for pattern in settings.INJECTION_PATTERNS:
             if pattern["pattern"] in text_lower:
                 injection_issues.append(SecurityIssue(
                     type="injection_pattern",
@@ -161,6 +142,7 @@ class PolicyChecker:
                 security_issues=injection_issues,
                 reasoning="Detected potential prompt injection patterns"
             )
+        
         # If no injection patterns, return safe
         return SecurityCheck(
             is_safe=True,
@@ -168,12 +150,8 @@ class PolicyChecker:
             security_issues=[],
             reasoning="No injection patterns detected"
         )
-        
-        # If no obvious injection patterns, use LLM to check for more subtle issues
-        # response = await self.client.responses.parse(
 
     async def _verify_job_posting(self, text: str) -> JobPostingVerification:
-        """Verify if the content is a job posting using structured output."""
         response = await self.client.responses.parse(
             model="gpt-4o-2024-08-06",
             input=[
@@ -182,34 +160,22 @@ class PolicyChecker:
             ],
             text_format=JobPostingVerification,
         )
-        result = response.output_parsed
-        return result
+        return response.output_parsed
 
     async def _orchestrate_investigations(self, text: str) -> List[PolicyCategoryScore]:
-        """Determine which policy categories need investigation."""
-        # Get category descriptions for context
-        print("--------------------------------")
-        print("policies_data", self.policies_data)
-        print("--------------------------------")
-        
-        # Only use categories that exist in policies_data
         category_descriptions = {
-            category.value: self.policies_data["categories"][category.value]["description"]
-            for category in PolicyCategory
-            if category.value in self.policies_data["categories"]
+            category: self.policies_data["categories"][category]["description"]
+            for category in self.policies_data["categories"]
         }
-        
-        print("--------------------------------")
-        print("category_descriptions", category_descriptions)
-        print("--------------------------------")
-        
         response = await self.client.responses.parse(
             model="gpt-4o-2024-08-06",
-            input=text,
-            instructions=get_category_selection_instructions(category_descriptions),
+            input=[
+                {"role": "system", "content": get_category_selection_instructions(category_descriptions)},
+                {"role": "user", "content": text}
+            ],
             text_format=PolicyCategoryScoreList
         )
-        return response.output[0].content[0].parsed.categories
+        return response.output_parsed.categories
 
     async def _run_parallel_investigations(
         self, 
@@ -217,31 +183,22 @@ class PolicyChecker:
         categories: List[PolicyCategoryScore]
     ) -> List[PolicyInvestigationResult]:
         """Run parallel investigations for policy categories."""
-            
         # Create tasks for parallel execution
         # we only want to investigate the top 3 categories
-        top_3_categories = sorted(categories, key=lambda x: x.confidence, reverse=True)[:MAX_PARALLEL_INVESTIGATIONS]
+        top_3_categories = sorted(categories, key=lambda x: x.confidence, reverse=True)[:settings.MAX_PARALLEL_INVESTIGATIONS]
         #only investigate categories that are above the threshold
-        categories_to_investigate = [category for category in top_3_categories if category.confidence > POLICY_INVESTIGATION_THRESHOLD]
+        categories_to_investigate = [category for category in top_3_categories if category.confidence > settings.POLICY_INVESTIGATION_THRESHOLD]
         tasks = [
             self._investigate_category(text, category)
             for category in categories_to_investigate
         ]
         
-        print("--------------------------------")
-        print("categories_to_investigate", categories_to_investigate)
-        print("--------------------------------")
-        
         # Run investigations in parallel with timeout
         try:
             results = await asyncio.wait_for(
                 asyncio.gather(*tasks, return_exceptions=True),
-                timeout=LLM_INVESTIGATION_TIMEOUT
+                timeout=settings.LLM_INVESTIGATION_TIMEOUT
             )
-            
-            print("--------------------------------")
-            print("results", results)
-            print("--------------------------------")
             
             # Filter out any failed investigations
             successful_results = []
@@ -259,8 +216,7 @@ class PolicyChecker:
             # If we have no successful results, return a failure result
             if not successful_results and results:
                 return [PolicyInvestigationResult(
-                    category=PolicyCategory.UNDEFINED,  # Default to Undefined category for error cases
-                    confidence=0.0,
+                    category="undefined",
                     violations=[PolicyViolationContent(
                         policy_id="INVESTIGATION_FAILED",
                         policy_title="Investigation Failed",
@@ -279,8 +235,7 @@ class PolicyChecker:
         except Exception as e:
             print(f"Unexpected error in parallel investigations: {str(e)}")
             return [PolicyInvestigationResult(
-                category=PolicyCategory.UNDEFINED,  # Default to Undefined category for error cases
-                confidence=0.0,
+                category="undefined",
                 violations=[PolicyViolationContent(
                     policy_id="INVESTIGATION_ERROR",
                     policy_title="Investigation Error",
@@ -294,8 +249,7 @@ class PolicyChecker:
     def _create_timeout_result(self, text: str, justification: str) -> PolicyInvestigationResult:
         """Create a timeout result with the given justification."""
         return PolicyInvestigationResult(
-            category=PolicyCategory.UNDEFINED,  # Default to Undefined category for error cases
-            confidence=0.0,
+            category="undefined",
             violations=[PolicyViolationContent(
                 policy_id="TIMEOUT",
                 policy_title="Investigation Timeout",
@@ -313,18 +267,16 @@ class PolicyChecker:
     ) -> PolicyInvestigationResult:
         """Investigate a specific policy category using structured output."""
         try:
-            # Get relevant policies for this category
-            category_data = self.policies_data["categories"][category.category.value]
-            
+            category_data = self.policies_data["categories"][category.category]
             response = await self.client.responses.parse(
                 model="gpt-4o-2024-08-06",
-                input=text,
-                instructions=get_policy_investigation_instructions(category.category.value, category_data),
+                input=[
+                    {"role": "system", "content": get_policy_investigation_instructions(category.category, category_data)},
+                    {"role": "user", "content": text}
+                ],
                 text_format=PolicyInvestigationResult
             )
-            
-            result = response.output[0].content[0].parsed
-            return result
+            return response.output_parsed
         except Exception as e:
-            print(f"Error investigating category {category.category.value}: {str(e)}")
+            print(f"Error investigating category {category.category}: {str(e)}")
             raise 
