@@ -10,7 +10,6 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 from pgvector.sqlalchemy import Vector
 
-# revision identifiers, used by Alembic.
 revision = 'add_job_posting_embeddings'
 down_revision = '04ec75eb74b4'
 branch_labels = None
@@ -32,7 +31,7 @@ def upgrade():
         sa.PrimaryKeyConstraint('id')
     )
     
-    # Create an index on the embedding column for faster similarity search
+    # Creating an index on the embedding column for faster similarity search
     op.create_index(
         'job_posting_embeddings_embedding_idx',
         'job_posting_embeddings',

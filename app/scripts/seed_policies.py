@@ -140,7 +140,6 @@ async def seed_database():
         # Create categories
         category_map = {}
         for category_data in CATEGORIES:
-            # Check if category exists
             stmt = select(PolicyCategory).where(PolicyCategory.name == category_data["name"])
             result = await session.execute(stmt)
             category = result.scalar_one_or_none()
@@ -159,7 +158,6 @@ async def seed_database():
         for policy_data in POLICIES:
             category = category_map[policy_data["category"]]
             
-            # Check if policy exists
             stmt = select(Policy).where(
                 Policy.title == policy_data["title"],
                 Policy.category_id == category.id
