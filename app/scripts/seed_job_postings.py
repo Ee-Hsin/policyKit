@@ -2,9 +2,9 @@
 
 import asyncio
 from app.core.database import async_session_factory
-from app.models.job_posting import JobPostingEmbedding
 from app.services.embedding_service import EmbeddingService
 from app.schemas.policy import StandardViolation, SafetyKitViolation
+import json
 
 # Example job postings
 EXAMPLE_POSTINGS = [
@@ -118,16 +118,17 @@ async def seed_database():
         for posting in EXAMPLE_POSTINGS:
             # Generate embedding for the job description
             embedding = await embedding_service.get_embedding(posting["job_description"])
-            # Create a new job posting embedding
-            job_posting = JobPostingEmbedding(
+            
+            # Convert violations to list of dicts and then to JSON string
+            violations = [v.dict() for v in posting["violations"]] if posting["violations"] else None
+            
+            # Store in ChromaDB
+            await embedding_service.store_job_posting(
                 job_description=posting["job_description"],
-                embedding=embedding,
                 has_violations=posting["has_violations"],
-                violations=[v.dict() for v in posting["violations"]] if posting["violations"] else None
+                violations=violations
             )
-            session.add(job_posting)
             print(f"Added job posting: {posting['job_description'][:50]}...")
-        await session.commit()
 
 if __name__ == "__main__":
     asyncio.run(seed_database()) 

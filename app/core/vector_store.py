@@ -52,8 +52,8 @@ class ChromaVectorStore:
         # Generate a unique ID
         id = str(len(self.collection.get()["ids"]) + 1)
         
-        # Convert violations to JSON string if present
-        violations_str = json.dumps(violations) if violations else None
+        # Convert violations to JSON string if present, otherwise use empty list string
+        violations_str = json.dumps(violations) if violations else "[]"
         
         # Add to collection
         self.collection.add(
