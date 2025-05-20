@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from app.models.policy import PolicyCategory, Policy
+from app.services.embedding_service import EmbeddingService
 from pydantic import BaseModel
 import asyncio
 
@@ -28,6 +29,7 @@ class PolicyChecker:
     def __init__(self, db: AsyncSession, api_key: Optional[str] = None):
         self.db = db
         self.client = AsyncOpenAI(api_key=api_key)
+        self.embedding_service = EmbeddingService(db, api_key)
     
     async def get_categories(self):
         result = await self.db.execute(
@@ -75,6 +77,28 @@ class PolicyChecker:
                 )]
             )
             
+        print("Job posting is verified as a job posting")
+            
+        # Step 3: Check for similar job postings using RAG
+        embedding = await self.embedding_service.get_embedding(job_description)
+        
+        similar_posting = await self.embedding_service.find_similar_job_postings(embedding, settings.VECTOR_SIMILARITY_THRESHOLD)
+        
+        print("after get embedding and find similar posting")
+        
+        if similar_posting:
+            job_posting, similarity_score = similar_posting
+            
+            print(f"Similarity score: {similarity_score}")
+            print(f"Job posting: {job_posting}")
+            
+            # If we found a very similar job posting, use its results
+            if similarity_score > settings.VECTOR_SIMILARITY_THRESHOLD:
+                return self.embedding_service.convert_to_final_output(job_posting)
+            
+        print("Passed RAG, continuing with normal flow")    
+        
+        # If no similar posting found, continue with normal flow
         #Retrieve categories
         categories = await self.get_categories()
         # Create the dynamic model for validation        
@@ -84,33 +108,21 @@ class PolicyChecker:
         for cat in categories:
             category_names.add(cat.name)
             category_ids.add(cat.id)
-            
-        #print("--------------------------------")
-        #print("category_names", category_names)
-        #print("--------------------------------")
-        #print("category_ids", category_ids)
-        #print("--------------------------------")
-        
+                        
         DynamicPolicyCategoryScoreList = create_policy_category_score_list_model(category_names, category_ids)
 
-        #print("--------------------------------")
-        #print("DynamicPolicyCategoryScoreList", DynamicPolicyCategoryScoreList)
-        #print("--------------------------------")
-
-        # Step 3: Orchestrate policy investigations and returns a DynamicPolicyCategoryScoreList
+        # Step 4: Orchestrate policy investigations and returns a DynamicPolicyCategoryScoreList
         categories_to_investigate = await self._orchestrate_investigations(
             job_description, 
             categories, 
             DynamicPolicyCategoryScoreList
         )
+        
+        print("categories_to_investigate: ", categories_to_investigate)
                 
         #Now we have a list of categories to investigate as well as the confidence scores and reasoning for each category
         # first only investigate the top 3 categories that all must have a confidence score above the threshold
         categories_to_investigate = [cat for cat in categories_to_investigate if cat.confidence > settings.POLICY_INVESTIGATION_CONFIDENCE_THRESHOLD][:3]
-        
-        #print("--------------------------------")
-        #print("categories to investigate", categories_to_investigate)
-        #print("--------------------------------")
         
         #Now we get the policies for each category
         #query the db for the policies
@@ -125,12 +137,10 @@ class PolicyChecker:
                 "policies": policies.scalars().all()
             })
             
-        #Now we have a list of policies to investigate
-        #print("--------------------------------")
-        #print("list_of_categories_with_policies", list_of_categories_with_policies)
-        #print("--------------------------------")
-        
+            
         investigation_results = await self._investigate_categories(job_description,list_of_categories_with_policies)
+        
+        print("investigation_results: ", investigation_results)
         
         # Now we have a list of investigation results. More specifically,
         # a list of CategoryInvestigation
@@ -139,12 +149,6 @@ class PolicyChecker:
         investigation_results = [result for result in investigation_results if result.confidence > settings.FINAL_OUTPUT_CONFIDENCE_THRESHOLD]
         
         # Let's now make a list of violations in which there are violation objects
-        # I want every violation to have:
-        # 1. Category of Violation (in it's name, so we'll have to query db using result.category_id)
-        # 2. Name of Policies in that Category violated (in it's name, so we'll have to query db using result.policies_violated_id)
-        # 3. The reasoning of the violation (just result.reasoning)
-        # 4. The content that violated (just result.content)
-        
         violations = []
         for result in investigation_results:
             category_result = await self.db.execute(
@@ -167,10 +171,19 @@ class PolicyChecker:
                 content=result.content
             ))
             
-        return FinalOutput(
+        final_output = FinalOutput(
             has_violations=len(violations) > 0,
             violations=violations
         )
+        
+        # Store the result for future RAG
+        await self.embedding_service.store_job_posting(
+            job_description=job_description,
+            has_violations=final_output.has_violations,
+            violations=[v.dict() for v in final_output.violations] if final_output.violations else None
+        )
+        
+        return final_output
         
 
     async def _check_security(self, text: str) -> SecurityCheck:
@@ -251,14 +264,27 @@ class PolicyChecker:
         for cat in categories_with_policies:
             tasks.append(self._investigate_individual_category(job_description, cat))
         
-        #TODO: Handle failures here
-        results = await asyncio.gather(*tasks)
-        
-        return results
+        try:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            # Filter out any exceptions and None results
+            valid_results = []
+            for result in results:
+                if isinstance(result, Exception):
+                    print(f"Task failed with error: {str(result)}")
+                    continue
+                if result is None:
+                    print("Task returned None")
+                    continue
+                valid_results.append(result)
+            
+            return valid_results
+        except Exception as e:
+            print(f"Error in _investigate_categories: {str(e)}")
+            return []
         
     async def _investigate_individual_category(self, job_description: str, category_with_policies: Dict[str, Any]) -> CategoryInvestigation:
         """Investigate an individual category and return a list of violations."""
-          
+                    
         # Make a call to the LLM to investigate the category
         response = await self.client.responses.parse(
             model=settings.OPENAI_MODEL,

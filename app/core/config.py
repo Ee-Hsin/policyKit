@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # OpenAI Settings
     OPENAI_API_KEY: str
     OPENAI_MODEL: str = "gpt-4o"
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     
     # Database Settings
     POSTGRES_USER: str = "postgres"
@@ -37,6 +38,7 @@ class Settings(BaseSettings):
     FINAL_OUTPUT_CONFIDENCE_THRESHOLD: float = 0.85
     MAX_PARALLEL_INVESTIGATIONS: int = 3
     LLM_INVESTIGATION_TIMEOUT: int = 30
+    VECTOR_SIMILARITY_THRESHOLD: float = 0.98  # 98% similarity threshold for RAG
     
     # Injection Patterns
     INJECTION_PATTERNS: List[Dict[str, Any]] = [

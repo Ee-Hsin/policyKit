@@ -71,8 +71,11 @@ def get_investigate_category_instructions(category_with_policies: dict) -> str:
         policies_string += f"Policy ID: {policy.id}\n"
         policies_string += f"Title: {policy.title}\n"
         policies_string += f"Description: {policy.description}\n"  
-        policies_string += "Example of a violation: \n"
-        policies_string += policy.extra_metadata["example"] + "\n\n"
+        if policy.extra_metadata and "example" in policy.extra_metadata:
+            policies_string += "Example of a violation: \n"
+            policies_string += policy.extra_metadata["example"] + "\n\n"
+        else:
+            policies_string += "\n"
     
     return f"""You are a policy compliance expert. Your task is to analyze the job posting and determine
 if it violates any of the policies in this current category. ONLY focus on the policies in this current category.

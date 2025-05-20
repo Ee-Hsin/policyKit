@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import ARRAY
 
 
 # revision identifiers, used by Alembic.
@@ -37,6 +38,14 @@ def upgrade() -> None:
     sa.Column('extra_metadata', sa.JSON(), nullable=True),
     sa.ForeignKeyConstraint(['category_id'], ['policy_categories.id'], ),
     sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(
+        'job_posting_embeddings_embedding_idx',
+        'job_posting_embeddings',
+        ['embedding'],
+        postgresql_using='ivfflat',
+        postgresql_with={'lists': 100},
+        postgresql_ops={'embedding': 'vector_cosine_ops'}
     )
     # ### end Alembic commands ###
 

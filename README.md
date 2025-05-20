@@ -1,237 +1,99 @@
 # PolicyKit
 
-A FastAPI-based service for checking job postings against policy violations, with database-backed policy management.
+A modern, AI-powered job posting policy checker with Retrieval-Augmented Generation (RAG), vector search, and robust policy violation detection.
 
 ## Features
-
-- Job posting verification with confidence scoring
-- Security checks for prompt injection
-- Policy violation detection with parallel processing
-- Category-based policy investigation
-- Structured output with confidence scores
-- Database-backed policy management
-- Async database operations
-- Parallel policy investigations with timeout handling
+- **Policy Violation Detection**: Checks job postings for discrimination, legal, privacy, and academic misconduct violations.
+- **Retrieval-Augmented Generation (RAG)**: Uses vector embeddings to find and reuse results from similar job postings for efficiency and consistency.
+- **Vector Database**: Stores job posting embeddings in PostgreSQL with pgvector for fast similarity search.
+- **Flexible Policy Schema**: Supports both `StandardViolation` and `SafetyKitViolation` types for nuanced violation reporting.
+- **Async FastAPI Backend**: High-performance, async API for real-time job posting checks.
+- **Seeding & Testing**: Includes scripts to seed the database with example job postings and policies.
 
 ## Setup
 
-1. Create a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+### 1. Install Dependencies
+- Create and activate a Python virtual environment:
+  ```sh
+  python3 -m venv venv
+  source venv/bin/activate
+  ```
+- Install Python dependencies:
+  ```sh
+  pip install -r requirements.txt
+  ```
+- Install PostgreSQL and [pgvector](https://github.com/pgvector/pgvector):
+  ```sh
+  brew install postgresql
+  brew install pgvector
+  ```
+
+### 2. Database Setup
+- Ensure PostgreSQL is running and create the database:
+  ```sh
+  createdb policykit
+  ```
+- Enable the vector extension and run migrations:
+  ```sh
+  psql policykit -c "CREATE EXTENSION IF NOT EXISTS vector;"
+  alembic upgrade head
+  ```
+
+### 3. Seeding Example Data
+- Seed the database with example job postings and embeddings:
+  ```sh
+  python -m app.scripts.seed_job_postings
+  ```
+
+## API Usage
+
+### Check a Job Posting
+Send a POST request to `/api/v1/check-posting`:
+```sh
+curl -X POST http://localhost:8000/api/v1/check-posting \
+  -H "Content-Type: application/json" \
+  -d '{"job_description": "Looking for a young, energetic female candidate to join our team. Must be under 30 years old."}'
 ```
 
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-3. Create a `.env` file with your configuration:
-```
-OPENAI_API_KEY=your_api_key_here
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=policykit
-```
-
-4. Set up the database:
-```bash
-# Create the database
-createdb policykit
-
-# Run migrations
-alembic upgrade head
-```
-
-## Policy Structure
-
-The system uses a hierarchical structure for policies:
-
-1. **Policy Categories**: Top-level groupings of related policies
-   - Each category has a name, ID, and description
-   - Categories are used to organize policies by type (e.g., "Discrimination", "Legal", "Compensation")
-   - Categories are scored for relevance to the job posting
-
-2. **Policies**: Individual rules within each category
-   - Each policy has a title, description, and ID
-   - Policies can have additional metadata in JSON format
-   - Policies are linked to their parent category
-   - Policies can include examples of violations
-
-### Example Policy Structure
-
-```python
-# Example category
-discrimination_category = {
-    "name": "Discrimination",
-    "description": "Policies related to discrimination, bias, and equal opportunity",
-    "policies": [
-        {
-            "title": "No Age Discrimination",
-            "description": "Job postings must not discriminate based on age",
-            "extra_metadata": {
-                "examples": ["must be under 30", "recent graduate only"]
-            }
-        },
-        {
-            "title": "No Gender Discrimination",
-            "description": "Job postings must not discriminate based on gender",
-            "extra_metadata": {
-                "examples": ["male candidates only", "female preferred"]
-            }
-        }
-    ]
-}
-```
-
-### Populating the Database
-
-You can populate the database with policies using SQLAlchemy. Here's an example script:
-
-```python
-from app.core.database import async_session_factory
-from app.models.policy import PolicyCategory, Policy
-
-async def populate_policies():
-    async with async_session_factory() as session:
-        # Create a category
-        discrimination = PolicyCategory(
-            name="Discrimination",
-            description="Policies related to discrimination, bias, and equal opportunity"
-        )
-        session.add(discrimination)
-        await session.flush()  # Get the category ID
-
-        # Add policies to the category
-        policies = [
-            Policy(
-                category_id=discrimination.id,
-                title="No Age Discrimination",
-                description="Job postings must not discriminate based on age",
-                extra_metadata={
-                    "examples": ["must be under 30", "recent graduate only"]
-                }
-            ),
-            Policy(
-                category_id=discrimination.id,
-                title="No Gender Discrimination",
-                description="Job postings must not discriminate based on gender",
-                extra_metadata={
-                    "examples": ["male candidates only", "female preferred"]
-                }
-            )
-        ]
-        session.add_all(policies)
-        await session.commit()
-
-# Run the population script
-import asyncio
-asyncio.run(populate_policies())
-```
-
-Save this script as `scripts/populate_policies.py` and run it after setting up your database:
-
-```bash
-python scripts/populate_policies.py
-```
-
-## Running the API
-
-Start the API server:
-```bash
-uvicorn app.main:app --reload
-```
-
-The API will be available at `http://localhost:8000`
-
-## API Documentation
-
-Once the server is running, you can access:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
-
-## API Endpoints
-
-### POST /api/v1/check-posting
-Check a job posting for policy violations.
-
-Request body:
+#### Example Response
 ```json
 {
-    "job_description": "string",
-    "image_path": "string (optional)"
+  "has_violations": true,
+  "violations": [
+    {
+      "category": "Discrimination",
+      "policy": ["No Gender Discrimination", "No Age Discrimination"],
+      "reasoning": "Job posting specifies gender and age requirements",
+      "content": "Looking for a young, energetic female candidate to join our team. Must be under 30 years old."
+    }
+  ],
+  "metadata": null
 }
 ```
 
-Response:
-```json
-{
-    "has_violations": boolean,
-    "violations": [
-        {
-            "category": "string",
-            "policy": ["string"],
-            "reasoning": "string",
-            "content": "string"
-        }
-    ]
-}
-```
+### Violation Types
+- **StandardViolation**: Used for most policy violations (discrimination, legal, privacy, academic, etc.)
+- **SafetyKitViolation**: Used for prompt injection, scam, or other safety-related issues
 
-### GET /api/v1/health
-Health check endpoint.
+### RAG & Vector Search
+- When a new job posting is checked, its embedding is generated and compared to existing embeddings in the database.
+- If a similar posting is found (above a similarity threshold), its result is reused for efficiency.
+- Otherwise, the posting is checked against all policies and the result is stored for future RAG.
 
-## Project Structure
+## Extending Policies
+- Add new policies and categories in the database.
+- Update the seeding script (`app/scripts/seed_job_postings.py`) to add more edge cases or new violation types.
 
-```
-app/
-├── api/
-│   └── v1/
-│       └── endpoints/
-│           └── policy_checker.py
-├── core/
-│   ├── config.py
-│   ├── database.py
-│   └── prompts.py
-├── models/
-│   └── policy.py
-├── schemas/
-│   └── policy.py
-├── services/
-│   └── policy_checker.py
-├── migrations/
-│   └── versions/
-└── main.py
-```
+## Development & Testing
+- Run tests with pytest:
+  ```sh
+  python -m pytest tests/api/test_policy_api.py -v -s
+  ```
+- Example test cases are provided for all major violation types and edge cases.
 
-## Development
+## Troubleshooting
+- If you encounter errors related to missing fields or database issues, ensure migrations are up to date and the database is seeded.
+- For vector search issues, verify that the `pgvector` extension is enabled and the `job_posting_embeddings` table exists.
 
-- The API is built with FastAPI
-- Uses Pydantic for data validation
-- OpenAI's GPT-4 for policy checking
-- Async/await for parallel processing
-- SQLAlchemy for database operations
-- Alembic for database migrations
-
-## Configuration Settings
-
-Key configuration settings in `.env`:
-- `JOB_POSTING_CONFIDENCE_THRESHOLD`: 0.9 (Confidence required to reject non-job postings)
-- `POLICY_INVESTIGATION_CONFIDENCE_THRESHOLD`: 0.7 (Minimum confidence to investigate a category)
-- `FINAL_OUTPUT_CONFIDENCE_THRESHOLD`: 0.85 (Minimum confidence to report a violation)
-- `MAX_PARALLEL_INVESTIGATIONS`: 3 (Maximum number of parallel category investigations)
-- `LLM_INVESTIGATION_TIMEOUT`: 30 (Timeout in seconds for LLM investigations)
-
-## Testing
-
-Run the tests:
-```bash
-pytest tests/
-```
-
-The test suite includes:
-- API endpoint tests
-- Policy violation detection tests
-- Database integration tests 
+## License
+MIT 
