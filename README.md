@@ -6,7 +6,7 @@ meet all of your platform's policies while learning from previous reviews to imp
 ## Features
 - **AI Compliance Agent**: An intelligent system that understands and enforces complex policy requirements, detecting violations with high accuracy.
 - **Retrieval-Augmented Generation (RAG)**: Uses vector embeddings to find and reuse results from similar job postings for efficiency and consistency. Successful classifications are embedded and added to the database for quicker classification in subsequent requests.
-- **Vector Database**: Stores job posting embeddings in `PostgreSQL` with `pgvector` for fast similarity search.
+- **Vector Database**: Uses Chroma, a dedicated vector database, for efficient similarity search and storage of job posting embeddings.
 - **Flexible Policy Schema**: Supports both `StandardViolation` and `SafetyKitViolation` types for nuanced violation reporting.
 - **Async FastAPI Backend**: High-performance, async API for real-time job posting checks.
 - **Seeding & Testing**: Includes scripts to seed the database with example job postings and policies.
@@ -43,10 +43,9 @@ The architecture diagram illustrates:
   ```sh
   pip install -r requirements.txt
   ```
-- Install PostgreSQL and [pgvector](https://github.com/pgvector/pgvector):
+- Install PostgreSQL:
   ```sh
   brew install postgresql
-  brew install pgvector
   ```
 
 ### 2. Database Setup
@@ -54,9 +53,8 @@ The architecture diagram illustrates:
   ```sh
   createdb policykit
   ```
-- Enable the vector extension and run migrations:
+- Run migrations:
   ```sh
-  psql policykit -c "CREATE EXTENSION IF NOT EXISTS vector;"
   alembic upgrade head
   ```
 
@@ -69,11 +67,11 @@ To seed the database with policy categories and their respective policies:
 python -m app.scripts.seed_policies
 ```
 This script includes policies that cover:
-- Discrimination"
-- Legal Compliance"
-- Workplace Standards"
-- Compensation"
-- Privacy and Security"
+- Discrimination
+- Legal Compliance
+- Workplace Standards
+- Compensation
+- Privacy and Security
 
 #### b. Seed Job Postings
 This script populates the database with example job postings and their embeddings for RAG:
@@ -96,9 +94,6 @@ psql policykit -c "SELECT * FROM policy_categories;"
 
 # Check policies
 psql policykit -c "SELECT p.id, p.title, c.name as category FROM policies p JOIN policy_categories c ON p.category_id = c.id;"
-
-# Check job posting embeddings
-psql policykit -c "SELECT id, job_description, has_violations FROM job_posting_embeddings;"
 ```
 
 ## API Usage
@@ -132,9 +127,10 @@ curl -X POST http://localhost:8000/api/v1/check-posting \
 - **SafetyKitViolation**: Used for prompt injection, or other safety-related issues
 
 ### RAG & Vector Search
-- When a new job posting is checked, its embedding is generated and compared to existing embeddings in the database.
+- When a new job posting is checked, its embedding is generated and compared to existing embeddings in Chroma.
 - If a similar posting is found (above a similarity threshold), its result is reused for efficiency.
-- Otherwise, the posting is checked against all policies and the result is stored for future RAG.
+- Otherwise, the posting is checked against all policies and the result is stored in Chroma for future RAG.
+- Chroma provides efficient similarity search using HNSW (Hierarchical Navigable Small World) algorithm.
 
 ## Extending Policies
 - Add new policies and categories in the database.
@@ -149,11 +145,9 @@ curl -X POST http://localhost:8000/api/v1/check-posting \
 
 ## Troubleshooting
 - If you encounter errors related to missing fields or database issues, ensure migrations are up to date and the database is seeded.
-- For vector search issues, verify that the `pgvector` extension is enabled and the `job_posting_embeddings` table exists.
-- If seeding fails, check that:
-  - The database exists and is accessible
-  - The pgvector extension is enabled
-  - All required tables are created (run migrations)
+- For vector search issues, verify that:
+  - The Chroma database is properly initialized in the `.chroma` directory
+  - The job posting embeddings collection exists
   - Your virtual environment is activated
   - All dependencies are installed
 

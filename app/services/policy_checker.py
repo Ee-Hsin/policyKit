@@ -83,6 +83,8 @@ class PolicyChecker:
         # Step 3: Check for similar job postings using RAG
         embedding = await self.embedding_service.get_embedding(job_description)
         
+        print("creating embedding")
+        
         similar_posting = await self.embedding_service.find_similar_job_postings(embedding, settings.VECTOR_SIMILARITY_THRESHOLD)
         
         print("after get embedding and find similar posting")
