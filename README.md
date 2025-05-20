@@ -58,7 +58,7 @@ Here’s how it works:
 - The **Orchestrator** is given a high-level overview: a summary of each policy category and what it covers.
 - Based on the job posting, it dynamically selects relevant categories and **spawns Workers** to investigate each one.
 - Each **Worker** receives the **full list of policies** within their category and performs a detailed compliance check.
-- All Workers run **in parallel** using `asyncio` to maximize speed and efficiency.
+- All Workers run **in parallel** using `asyncio`.
 - The individual results are **aggregated and returned** to the client with the policy categories and potential violations clearly identified.
 
 ---
