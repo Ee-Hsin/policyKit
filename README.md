@@ -39,11 +39,44 @@ A modern, AI-powered job posting policy checker with Retrieval-Augmented Generat
   alembic upgrade head
   ```
 
-### 3. Seeding Example Data
-- Seed the database with example job postings and embeddings:
-  ```sh
-  python -m app.scripts.seed_job_postings
-  ```
+### 3. Seeding the Database
+The project includes several seeding scripts to populate the database with initial data:
+
+#### a. Seed Job Postings
+This script populates the database with example job postings and their embeddings for RAG:
+```sh
+python -m app.scripts.seed_job_postings
+```
+The script includes examples of:
+- Gender and age discrimination
+- Illegal activities
+- Copyright infringement
+- Academic misconduct
+- Privacy violations
+- Multiple violation types
+
+#### b. Seed Policies
+To seed the database with policies and categories:
+```sh
+python -m app.scripts.seed_policies
+```
+This creates:
+- Policy categories (e.g., Discrimination, Legal Compliance)
+- Individual policies within each category
+- Example violations and metadata
+
+#### c. Verify Seeding
+You can verify the seeded data using PostgreSQL:
+```sh
+# Check policy categories
+psql policykit -c "SELECT * FROM policy_categories;"
+
+# Check policies
+psql policykit -c "SELECT p.id, p.title, c.name as category FROM policies p JOIN policy_categories c ON p.category_id = c.id;"
+
+# Check job posting embeddings
+psql policykit -c "SELECT id, job_description, has_violations FROM job_posting_embeddings;"
+```
 
 ## API Usage
 
@@ -73,7 +106,7 @@ curl -X POST http://localhost:8000/api/v1/check-posting \
 
 ### Violation Types
 - **StandardViolation**: Used for most policy violations (discrimination, legal, privacy, academic, etc.)
-- **SafetyKitViolation**: Used for prompt injection, scam, or other safety-related issues
+- **SafetyKitViolation**: Used for prompt injection, or other safety-related issues
 
 ### RAG & Vector Search
 - When a new job posting is checked, its embedding is generated and compared to existing embeddings in the database.
@@ -94,6 +127,12 @@ curl -X POST http://localhost:8000/api/v1/check-posting \
 ## Troubleshooting
 - If you encounter errors related to missing fields or database issues, ensure migrations are up to date and the database is seeded.
 - For vector search issues, verify that the `pgvector` extension is enabled and the `job_posting_embeddings` table exists.
+- If seeding fails, check that:
+  - The database exists and is accessible
+  - The pgvector extension is enabled
+  - All required tables are created (run migrations)
+  - Your virtual environment is activated
+  - All dependencies are installed
 
 ## License
 MIT 

@@ -98,6 +98,11 @@ POLICIES = [
         "title": "No Academic Misconduct",
         "description": "Job postings must not offer to prepare academic works on behalf of others.",
     },
+    {
+        "category": "Legal Compliance",
+        "title": "No Spam Content",
+        "description": "Job postings must not contain spam, nonsense, or violent content.",
+    },
     
     # Workplace Standards Category
     {
@@ -110,12 +115,6 @@ POLICIES = [
         "title": "No Exploitation",
         "description": "Job postings must not promote exploitative working conditions, such as more than 80 hours per week or extremely dangerous working conditions.",
     },
-    {
-        "category": "Workplace Standards",
-        "title": "No Spam Content",
-        "description": "Job postings must not contain spam, nonsense, or violent content.",
-    },
-    
     # Compensation Category
     {
         "category": "Compensation",
