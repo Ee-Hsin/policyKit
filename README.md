@@ -14,22 +14,54 @@ meet all of your platform's policies while learning from previous reviews to imp
 ## System Architecture
 
 ### AI Agent Design
-The PolicyKit AI agent follows a sophisticated architecture that combines language models, vector search, and policy enforcement. Below is a high-level overview of the system design:
+The PolicyKit AI agent follows the following design:
 
 <div style="display: flex; justify-content: space-between;">
-    <img src="docs/images/Agent_Design_Left.png" alt="PolicyKit AI Agent Architecture - Left Side" style="width: 48%;""">
+    <img src="docs/images/Agent_Design_Left.png" alt="PolicyKit AI Agent Architecture - Left Side" style="width: 43%;""">
     <img src="docs/images/Agent_Design_right.png" alt="PolicyKit AI Agent Architecture - Right Side" style="width: 48%;""">
 </div>
 
-For a detailed, interactive view of the system architecture, you can:
-1. Open the [PolicyKit.drawio](PolicyKit_AI_Agent.drawio) file in [draw.io](https://app.diagrams.net/)
+For a detailed, interactive view of the system architecture, you can open the [PolicyKit.drawio](PolicyKit_AI_Agent.drawio) file in [draw.io](https://app.diagrams.net/)
 
-The architecture diagram illustrates:
-- The flow of job posting analysis
-- Integration with OpenAI's language models
-- Vector database interactions
-- Policy enforcement pipeline
-- RAG implementation details
+# Design Choices Explanation
+
+## 1. **Input Validation and Safety Checks**
+
+I began by validating that the input is indeed a job posting and safe to process. This included checking for prompt injection or other potentially malicious input. I implemented a **gating mechanism** to enforce this safety, inspired by the gating design pattern:
+
+> ![Gating Pattern](https://github.com/user-attachments/assets/afbefe68-c2eb-4240-9704-67ed504f6bc4)
+
+FYI, this pattern is described in Anthropic’s article on [Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents), which I have used as a building block for my learnings into AI agents
+
+---
+
+## 2. **Using a Vector Database as a Semantic Cache**
+
+I used **ChromaDB** as a vector database — not for traditional RAG in the usual sense, but as a **semantic cache**.
+
+Initially, I considered using RAG to retrieve relevant policies. However, I realized that this approach assumes the input (job posting) is semantically similar to the policies it's meant to comply with. That’s often **not the case** — especially when a job post *violates* a policy. For example, a job offering “420-themed rewards” is unlikely to be semantically close to “mentions of illegal substances are prohibited.”
+
+Therefore:
+- I embedded **edge cases** like job postings that subtly violate policies
+- I stored **classified job postings** in the vector DB. Since most postings follow consistent patterns, this allows the vector DB to function as a **semantic cache**. The more data the system sees, the faster and smarter it becomes.
+- This enables **fast short-circuiting**: if a new posting is similar to a previously classified one, we can retrieve that result instantly without running the full classification pipeline again.
+
+---
+
+## 3. **Fallback: Orchestrator-Worker Model for New or Uncached Inputs**
+
+If the vector search doesn't return a confident classification (i.e., it’s a **new or rare case**), the system falls back to a **multi-agent architecture** using an **Orchestrator-Worker pattern**:
+
+> ![Orchestrator Diagram](https://github.com/user-attachments/assets/852dc5af-211e-4c4c-86c6-d44654edea9e)
+
+Here’s how it works:
+- The **Orchestrator** is given a high-level overview: a summary of each policy category and what it covers.
+- Based on the job posting, it dynamically selects relevant categories and **spawns Workers** to investigate each one.
+- Each **Worker** receives the **full list of policies** within their category and performs a detailed compliance check.
+- All Workers run **in parallel** using `asyncio` to maximize speed and efficiency.
+- The individual results are **aggregated and returned** to the client with the policy categories and potential violations clearly identified.
+
+---
 
 ## Setup
 
