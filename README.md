@@ -17,8 +17,8 @@ meet all of your platform's policies while learning from previous reviews to imp
 The PolicyKit AI agent follows the following design:
 
 <div style="display: flex; justify-content: space-between;">
-    <img src="docs/images/Agent_Design_Left.png" alt="PolicyKit AI Agent Architecture - Left Side" style="width: 43%;""">
-    <img src="docs/images/Agent_Design_right.png" alt="PolicyKit AI Agent Architecture - Right Side" style="width: 48%;""">
+    <img src="docs/images/Agent_Design_Left.png" alt="PolicyKit AI Agent Architecture - Left Side" style="width: 40%;""">
+    <img src="docs/images/Agent_Design_right.png" alt="PolicyKit AI Agent Architecture - Right Side" style="width: 49%;""">
 </div>
 
 For a detailed, interactive view of the system architecture, you can open the [PolicyKit.drawio](PolicyKit_AI_Agent.drawio) file in [draw.io](https://app.diagrams.net/)
