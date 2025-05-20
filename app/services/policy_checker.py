@@ -202,7 +202,7 @@ class PolicyChecker:
 
     async def _verify_job_posting(self, text: str) -> JobPostingVerification:
         response = await self.client.responses.parse(
-            model="gpt-4o-2024-08-06",
+            model=settings.OPENAI_MODEL,
             input=[
                 {"role": "system", "content": get_job_posting_instructions()},
                 {"role": "user", "content": text}
@@ -230,7 +230,7 @@ class PolicyChecker:
         ]
                 
         response = await self.client.responses.parse(
-            model="gpt-4o-2024-08-06",
+            model=settings.OPENAI_MODEL,
             input=[
                 {"role": "system", "content": get_category_selection_instructions(category_descriptions)},
                 {"role": "user", "content": text}
@@ -259,10 +259,9 @@ class PolicyChecker:
     async def _investigate_individual_category(self, job_description: str, category_with_policies: Dict[str, Any]) -> CategoryInvestigation:
         """Investigate an individual category and return a list of violations."""
           
-        
         # Make a call to the LLM to investigate the category
         response = await self.client.responses.parse(
-            model="gpt-4o-2024-08-06",
+            model=settings.OPENAI_MODEL,
             input=[
                 {"role": "system", "content": get_investigate_category_instructions(category_with_policies)},
                 {"role": "user", "content": job_description}
