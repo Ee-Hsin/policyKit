@@ -17,7 +17,7 @@ meet all of your platform's policies while learning from previous reviews to imp
 The PolicyKit AI agent follows a sophisticated architecture that combines language models, vector search, and policy enforcement. Below is a high-level overview of the system design:
 
 <div style="display: flex; justify-content: space-between;">
-    <img src="docs/images/Agent_Design_Left.png" alt="PolicyKit AI Agent Architecture - Left Side" style="width: 45%;""">
+    <img src="docs/images/Agent_Design_Left.png" alt="PolicyKit AI Agent Architecture - Left Side" style="width: 43%;""">
     <img src="docs/images/Agent_Design_right.png" alt="PolicyKit AI Agent Architecture - Right Side" style="width: 55%;""">
 </div>
 
