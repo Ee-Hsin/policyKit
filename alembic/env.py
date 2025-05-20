@@ -1,26 +1,18 @@
 import asyncio
 from logging.config import fileConfig
 from sqlalchemy import pool
-from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 from alembic import context
 
-# Import your app's settings and models
 from app.core.config import settings
 from app.core.database import Base
-import app.models.policy  # Ensure models are imported
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
 config = context.config
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
 fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
 
-# Set the SQLAlchemy URL from your app config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
 def run_migrations_offline():

@@ -1,14 +1,33 @@
 # PolicyKit
 
-A modern, AI-powered job posting policy checker with Retrieval-Augmented Generation (RAG), vector search, and robust policy violation detection.
+An AI-agent specializing in compliance to review job postings for policy violations. Using OpenAI's language models and vector search, PolicyKit acts as your intelligent compliance officer, ensuring job postings on your platform
+meet all of your platform's policies while learning from previous reviews to improve efficiency.
 
 ## Features
-- **Policy Violation Detection**: Checks job postings for discrimination, legal, privacy, and academic misconduct violations.
-- **Retrieval-Augmented Generation (RAG)**: Uses vector embeddings to find and reuse results from similar job postings for efficiency and consistency.
-- **Vector Database**: Stores job posting embeddings in PostgreSQL with pgvector for fast similarity search.
+- **AI Compliance Agent**: An intelligent system that understands and enforces complex policy requirements, detecting violations with high accuracy.
+- **Retrieval-Augmented Generation (RAG)**: Uses vector embeddings to find and reuse results from similar job postings for efficiency and consistency. Successful classifications are embedded and added to the database for quicker classification in subsequent requests.
+- **Vector Database**: Stores job posting embeddings in `PostgreSQL` with `pgvector` for fast similarity search.
 - **Flexible Policy Schema**: Supports both `StandardViolation` and `SafetyKitViolation` types for nuanced violation reporting.
 - **Async FastAPI Backend**: High-performance, async API for real-time job posting checks.
 - **Seeding & Testing**: Includes scripts to seed the database with example job postings and policies.
+
+## System Architecture
+
+### AI Agent Design
+The PolicyKit AI agent follows a sophisticated architecture that combines language models, vector search, and policy enforcement. Below is a high-level overview of the system design:
+
+![PolicyKit AI Agent Architecture](docs/images/Agent_Design_Left.png)
+![PolicyKit AI Agent Architecture](docs/images/Agent_Design_Right.png)
+
+For a detailed, interactive view of the system architecture, you can:
+1. Open the [PolicyKit_AI_Agent.drawio](PolicyKit_AI_Agent.drawio) file in [draw.io](https://app.diagrams.net/)
+
+The architecture diagram illustrates:
+- The flow of job posting analysis
+- Integration with OpenAI's language models
+- Vector database interactions
+- Policy enforcement pipeline
+- RAG implementation details
 
 ## Setup
 
@@ -42,7 +61,19 @@ A modern, AI-powered job posting policy checker with Retrieval-Augmented Generat
 ### 3. Seeding the Database
 The project includes several seeding scripts to populate the database with initial data:
 
-#### a. Seed Job Postings
+#### a. Seed Policies
+To seed the database with policy categories and their respective policies:
+```sh
+python -m app.scripts.seed_policies
+```
+This script includes policies that cover:
+- Discrimination"
+- Legal Compliance"
+- Workplace Standards"
+- Compensation"
+- Privacy and Security"
+
+#### b. Seed Job Postings
 This script populates the database with example job postings and their embeddings for RAG:
 ```sh
 python -m app.scripts.seed_job_postings
@@ -54,16 +85,6 @@ The script includes examples of:
 - Academic misconduct
 - Privacy violations
 - Multiple violation types
-
-#### b. Seed Policies
-To seed the database with policies and categories:
-```sh
-python -m app.scripts.seed_policies
-```
-This creates:
-- Policy categories (e.g., Discrimination, Legal Compliance)
-- Individual policies within each category
-- Example violations and metadata
 
 #### c. Verify Seeding
 You can verify the seeded data using PostgreSQL:
