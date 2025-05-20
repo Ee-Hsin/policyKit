@@ -15,7 +15,8 @@ from app.schemas.policy import (
 from app.core.prompts import (
     get_job_posting_instructions,
     get_category_selection_instructions,
-    get_investigate_category_instructions
+    get_investigate_category_instructions,
+    get_injection_patterns_instructions
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -53,13 +54,13 @@ class PolicyChecker:
         
         # Step 1: Check for security issues first
         security_check = await self._check_security(job_description)
-        if not security_check.is_safe:
+        if not security_check.is_safe and security_check.confidence > settings.SECURITY_CHECK_CONFIDENCE_THRESHOLD:
             return FinalOutput(
                 has_violations=True,
                 violations=[SafetyKitViolation(
                     category="PROMPT_INJECTION",
-                    confidence=1.0,
-                    reasoning="Detected potential prompt injection patterns"
+                    confidence=security_check.confidence,
+                    reasoning=security_check.reasoning
                 )]
             )
 
@@ -206,12 +207,13 @@ class PolicyChecker:
                 reasoning="Detected potential prompt injection patterns"
             )
         else:
-            # If no injection patterns, return safe
-            return SecurityCheck(
-                is_safe=True,
-                confidence=1.0,
-                reasoning="No injection patterns detected"
+            # If no injection patterns, let's make a call to the LLM to check for injection patterns
+            response = await self.client.responses.parse(
+                model=settings.OPENAI_MODEL,
+                input=[{"role": "system", "content": get_injection_patterns_instructions()}, {"role": "user", "content": text}],
+                text_format=SecurityCheck
             )
+            return response.output_parsed
 
     async def _verify_job_posting(self, text: str) -> JobPostingVerification:
         response = await self.client.responses.parse(
