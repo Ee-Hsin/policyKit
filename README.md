@@ -31,7 +31,7 @@ I began by validating that the input is indeed a job posting and safe to process
 
 > ![Gating Pattern](https://github.com/user-attachments/assets/afbefe68-c2eb-4240-9704-67ed504f6bc4)
 
-FYI, this pattern is described in Anthropic’s article on [Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents), which I have used as a building block for my learnings into AI agents
+FYI, this pattern is described in Anthropic’s article on [Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents), which I have used as a building block for everything I've since learned about AI agents
 
 ---
 
@@ -58,7 +58,7 @@ Here’s how it works:
 - The **Orchestrator** is given a high-level overview: a summary of each policy category and what it covers.
 - Based on the job posting, it dynamically selects relevant categories and **spawns Workers** to investigate each one.
 - Each **Worker** receives the **full list of policies** within their category and performs a detailed compliance check.
-- All Workers run **in parallel** using `asyncio`.
+- All Workers run **concurrently** using `asyncio`.
 - The individual results are **aggregated and returned** to the client with the policy categories and potential violations clearly identified.
 
 ---
