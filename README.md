@@ -94,7 +94,7 @@ Here’s how it works:
 The project includes several seeding scripts to populate the database with initial data:
 
 #### a. Seed Policies
-To seed the database with policy categories and their respective policies:
+To seed the vector database with policy categories and their respective policies:
 ```sh
 python -m app.scripts.seed_policies
 ```
