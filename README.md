@@ -46,6 +46,9 @@ Therefore:
 - I stored **classified job postings** in the vector DB. Since most postings follow consistent patterns, this allows the vector DB to function as a **semantic cache**. The more data the system sees, the faster and smarter it becomes.
 - This enables **fast short-circuiting**: if a new posting is similar to a previously classified one, we can retrieve that result instantly without running the full classification pipeline again.
 
+There are currently two **concerns** with this RAG approach that can be improved:
+1. In the current implementation, the Agent’s response is immediately stored in the VectorDB. This introduces a potential flaw: if a job posting is misclassified once, similar future postings may also be misclassified due to reliance on that incorrect embedding. Given more time, I would modify this by queuing results for potential human review. Only classifications confirmed to be correct would then be added to the VectorDB.
+2. Job posting embeddings are static, but policies can evolve. A job that was compliant yesterday might violate new rules today. To address this, I would store either a timestamp or a version tag alongside each embedding. This would allow us to reclassify or invalidate older embeddings when policy changes are introduced.
 ---
 
 ## 3. **Fallback: Orchestrator-Worker Model for New or Uncached Inputs**
