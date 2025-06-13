@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.schemas.policy import FinalOutput
 from app.core.vector_store import ChromaVectorStore
+import base64
 
 class EmbeddingService:
     def __init__(self, db: AsyncSession, api_key: Optional[str] = None):
@@ -29,10 +30,10 @@ class EmbeddingService:
         """
         return await self.vector_store.find_similar_job_postings(embedding, threshold)
     
-    async def store_job_posting(self, job_description: str, has_violations: bool, violations: Optional[List[dict]] = None) -> str:
+    async def store_job_posting(self, job_description: str, has_violations: bool, violations: Optional[List[dict]] = None) -> None:
         """Store a new job posting with its embedding and policy check results."""
         embedding = await self.get_embedding(job_description)
-        return await self.vector_store.add_job_posting(
+        await self.vector_store.add_job_posting(
             job_description=job_description,
             embedding=embedding,
             has_violations=has_violations,

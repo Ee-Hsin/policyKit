@@ -25,6 +25,8 @@ from app.models.policy import PolicyCategory, Policy
 from app.services.embedding_service import EmbeddingService
 from pydantic import BaseModel
 import asyncio
+from fastapi import UploadFile
+import base64
 
 class PolicyChecker:
     def __init__(self, db: AsyncSession, api_key: Optional[str] = None):
@@ -39,14 +41,12 @@ class PolicyChecker:
         return result.scalars().all()
 
     async def check_job_posting(self, 
-                              job_description: str, 
-                              image_path: Optional[str] = None) -> FinalOutput:
+                              job_description: str) -> FinalOutput:
         """
         Check a job posting against all policies.
         
         Args:
             job_description: The text content of the job posting
-            image_path: Optional path to an image associated with the job posting
             
         Returns:
             FinalOutput containing any policy violations found
@@ -187,7 +187,74 @@ class PolicyChecker:
         )
         
         return final_output
+
+
+    #TODO: doesn't work properly yet, need to fix
+    async def check_image(self, image: UploadFile) -> FinalOutput:
+        """
+        Check an image for policy violations using OpenAI's vision API.
         
+        Args:
+            image: The image file to check
+            
+        Returns:
+            FinalOutput containing any policy violations found
+        """
+        # Read the image file
+        image_content = await image.read()
+        print(f"Processing image: {image.filename}, size: {len(image_content)} bytes")
+        
+        # Convert image to base64
+        base64_image = base64.b64encode(image_content).decode('utf-8')
+        
+        # Create the image input for OpenAI
+        image_input = {
+            "type": "input_image",
+            "image_url": f"data:image/{image.content_type};base64,{base64_image}",
+            "detail": "high"  # Use high detail for better analysis
+        }
+        
+        # Analyze the image content
+        response = await self.client.responses.create(
+            model=settings.OPENAI_MODEL,
+            input=[{
+                "role": "user",
+                "content": [
+                    image_input
+                ],
+            }],
+            instructions="Analyze the image content and ensure there are no obscene or inappropriate content. If there is, return a list of policy violations."
+        )
+        
+        # Get the analysis result
+        analysis = response.output_text
+        
+        print("analysis: ", analysis)
+        
+        # TODO: Process the analysis to check for specific policy violations
+        # For now, we'll just check if the analysis contains any concerning keywords
+        concerning_keywords = ["inappropriate", "violation", "policy", "unsafe", "harmful"]
+        has_violations = any(keyword in analysis.lower() for keyword in concerning_keywords)
+        
+        if has_violations:
+            return FinalOutput(
+                has_violations=True,
+                violations=[SafetyKitViolation(
+                    category="IMAGE_VIOLATION",
+                    confidence=0.8,  # Placeholder confidence score
+                    reasoning=analysis
+                )]
+            )
+        
+        return FinalOutput(
+            has_violations=False,
+            violations=[],
+            metadata={
+                "image_filename": image.filename,
+                "image_size": len(image_content),
+                "analysis": analysis
+            }
+        )
 
     async def _check_security(self, text: str) -> SecurityCheck:
         """Check for security issues including prompt injections."""

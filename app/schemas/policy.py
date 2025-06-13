@@ -1,5 +1,6 @@
 from typing import List, Optional, Any, Set, Type, Union
 from pydantic import BaseModel, create_model, validator
+from fastapi import UploadFile
 
 def create_policy_category_score_list_model(category_names: Set[str], category_ids: Set[int]) -> Type[BaseModel]:
     """Create dynamic PolicyCategoryScoreList model with validation."""
@@ -34,7 +35,6 @@ def create_policy_category_score_list_model(category_names: Set[str], category_i
 class JobPostingRequest(BaseModel):
     """Request body for job posting verification, this is what is passed into check_job_posting"""
     job_description: str
-    image_path: Optional[str] = None
     
 class SafetyKitViolation(BaseModel):
     """A violation model specifically for safetykit (for prompt injections and not job postings)

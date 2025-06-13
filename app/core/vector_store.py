@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple, Dict, Any
 import os
 from pathlib import Path
 import json
+import uuid
 
 class ChromaVectorStore:
     """Vector store implementation using Chroma."""
@@ -31,42 +32,21 @@ class ChromaVectorStore:
             metadata={"hnsw:space": "cosine"}  # Use cosine similarity
         )
     
-    async def add_job_posting(
-        self,
-        job_description: str,
-        embedding: List[float],
-        has_violations: bool,
-        violations: Optional[List[Dict[str, Any]]] = None
-    ) -> str:
-        """Add a job posting to the vector store.
-        
-        Args:
-            job_description: The job description text
-            embedding: The embedding vector
-            has_violations: Whether the job posting has violations
-            violations: List of violations if any
-            
-        Returns:
-            The ID of the added job posting
-        """
-        # Generate a unique ID
-        id = str(len(self.collection.get()["ids"]) + 1)
-        
-        # Convert violations to JSON string if present, otherwise use empty list string
+    async def add_job_posting(self, job_description: str, embedding: List[float], has_violations: bool, violations: Optional[List[Dict]] = None) -> None:
+        """Add a job posting to the vector store."""
+        # Convert violations to a JSON string, defaulting to empty list if None
         violations_str = json.dumps(violations) if violations else "[]"
         
-        # Add to collection
+        # Add to Chroma collection
         self.collection.add(
-            ids=[id],
+            ids=[str(uuid.uuid4())],  # Generate a random UUID for the ID
             embeddings=[embedding],
+            documents=[job_description],
             metadatas=[{
-                "job_description": job_description,
                 "has_violations": has_violations,
                 "violations": violations_str
             }]
         )
-        
-        return id
     
     async def find_similar_job_postings(
         self,
