@@ -7,7 +7,7 @@ meet all of your platform's policies while learning from previous reviews to imp
 - **AI Compliance Agent**: An intelligent system that understands and enforces complex policy requirements, detecting violations with high accuracy.
 - **Retrieval-Augmented Generation (RAG)**: Uses vector embeddings to find and reuse results from similar job postings for efficiency and consistency. Successful classifications are embedded and added to the database for quicker classification in subsequent requests.
 - **Vector Database**: Uses Chroma, a dedicated vector database, for efficient similarity search and storage of job posting embeddings.
-- **Flexible Policy Schema**: Supports both `StandardViolation` and `SafetyKitViolation` types for nuanced violation reporting.
+- **Flexible Policy Schema**: Supports both `StandardViolation` and `SafetyViolation` types for nuanced violation reporting.
 - **Async FastAPI Backend**: High-performance, async API for real-time job posting checks.
 - **Seeding & Testing**: Includes scripts to seed the database with example job postings and policies.
 
@@ -159,7 +159,7 @@ curl -X POST http://localhost:8000/api/v1/check-posting \
 
 ### Violation Types
 - **StandardViolation**: Used for most policy violations (discrimination, legal, privacy, academic, etc.)
-- **SafetyKitViolation**: Used for prompt injection, or other safety-related issues
+- **SafetyViolation**: Used for prompt injection, or other safety-related issues
 
 ### RAG & Vector Search
 - When a new job posting is checked, its embedding is generated and compared to existing embeddings in Chroma.
