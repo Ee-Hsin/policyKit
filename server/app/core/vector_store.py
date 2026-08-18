@@ -3,8 +3,6 @@
 import chromadb
 from chromadb.config import Settings
 from typing import List, Optional, Tuple, Dict, Any
-import os
-from pathlib import Path
 import json
 import uuid
 
@@ -82,9 +80,9 @@ class ChromaVectorStore:
         if metadata.get("violations"):
             metadata["violations"] = json.loads(metadata["violations"])
         
-        # Convert distance to similarity score (Chroma uses L2 distance)
-        # We'll convert it to a similarity score between 0 and 1
-        similarity = 1 / (1 + distance)  # Convert distance to similarity
+        # Convert distance to similarity score
+        # The collection uses cosine space, so cosine distance = 1 - cosine similarity
+        similarity = 1 - distance
         
         if similarity < threshold:
             return None

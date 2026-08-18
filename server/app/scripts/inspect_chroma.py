@@ -18,10 +18,10 @@ async def inspect_chroma():
         return
     
     print("\nItems:")
-    for i, (id, metadata) in enumerate(zip(results['ids'], results['metadatas']), 1):
+    for i, (id, document, metadata) in enumerate(zip(results['ids'], results['documents'], results['metadatas']), 1):
         print(f"\n--- Item {i} ---")
         print(f"ID: {id}")
-        print(f"Job Description: {metadata['job_description']}")
+        print(f"Job Description: {document}")
         print(f"Has Violations: {metadata['has_violations']}")
         if metadata.get('violations'):
             print("Violations:")

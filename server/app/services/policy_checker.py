@@ -95,9 +95,8 @@ class PolicyChecker:
             print(f"Similarity score: {similarity_score}")
             print(f"Job posting: {job_posting}")
             
-            # If we found a very similar job posting, use its results
-            if similarity_score > settings.VECTOR_SIMILARITY_THRESHOLD:
-                return self.embedding_service.convert_to_final_output(job_posting)
+            # If we found a similar job posting, use its results
+            return self.embedding_service.convert_to_final_output(job_posting)
             
         print("Passed RAG, continuing with normal flow")    
         

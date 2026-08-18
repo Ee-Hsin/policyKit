@@ -116,9 +116,6 @@ async def seed_database():
     async with async_session_factory() as session:
         embedding_service = EmbeddingService(db=session)
         for posting in EXAMPLE_POSTINGS:
-            # Generate embedding for the job description
-            embedding = await embedding_service.get_embedding(posting["job_description"])
-            
             # Convert violations to list of dicts and then to JSON string
             violations = [v.dict() for v in posting["violations"]] if posting["violations"] else None
             

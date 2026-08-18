@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.schemas.policy import FinalOutput
 from app.core.vector_store import ChromaVectorStore
-import base64
 
 class EmbeddingService:
     def __init__(self, db: AsyncSession, api_key: Optional[str] = None):
