@@ -1,153 +1,151 @@
 # PolicyKit
 
-An AI-agent specializing in compliance to review job postings for policy violations. Using OpenAI's language models and vector search, PolicyKit acts as your intelligent compliance officer, ensuring job postings on your platform
-meet all of your platform's policies while learning from previous reviews to improve efficiency.
+PolicyKit is a pre-publication compliance agent for job postings. It investigates a
+draft, checks every applicable platform policy, asks for missing facts, proposes precise
+revisions, and requires human approval before a revised posting can be published.
 
-## Project Structure
+The project is designed around a clear safety boundary: the OpenAI agent controls the
+investigation, while Python controls permissions, policy coverage, evidence validation,
+versioning, and the final publication gate.
 
+## Product flow
+
+1. A recruiter submits a draft and its hiring locations.
+2. The agent resolves which jurisdictions apply.
+3. The `run_compliance_check` tool loads every applicable policy from an immutable
+   PostgreSQL snapshot.
+4. A constrained OpenAI call assesses every policy and cites exact posting text.
+5. Python rejects incomplete policy coverage or invalid evidence offsets.
+6. The agent can read policies, search ChromaDB, ask a recruiter a focused question, or
+   propose a revision.
+7. Agent revisions pause for recruiter approval and are checked again after approval.
+8. Python permits publication only after the latest approved draft has a complete clean
+   check.
+
+## Technology responsibilities
+
+| Technology | Responsibility |
+| --- | --- |
+| Python | Agent runtime, tools, deterministic validation, worker, and evals |
+| FastAPI | Session, policy administration, review, publication, and event APIs |
+| OpenAI | Tool selection, structured policy assessment, and embeddings |
+| PostgreSQL | Canonical policies, snapshots, drafts, findings, approvals, and audit history |
+| ChromaDB | Rebuildable semantic index for policies and human-reviewed precedents |
+| Next.js | Recruiter workspace and policy administration interface |
+
+ChromaDB never stores the authoritative policy or returns a final verdict. Search results
+are hydrated and validated against PostgreSQL. Exact classifier reuse is keyed by posting
+text, policy snapshot, policy IDs, prompt version, and model configuration.
+
+## Local setup
+
+Requirements:
+
+- Python 3.12+
+- Node.js 22+
+- PostgreSQL 14+
+
+Copy the environment template and add an OpenAI project key:
+
+```bash
+cp .env.example .env
 ```
-policyKit/
-├── server/                 # Backend API and services
-│   ├── app/               # FastAPI application
-│   ├── tests/             # Backend tests
-│   └── alembic/           # Database migrations
-├── client/                # Frontend application (coming soon)
-└── docs/                  # Documentation
+
+Create the local database:
+
+```bash
+createdb policykit
 ```
 
-## Features
-- **AI Compliance Agent**: An intelligent system that understands and enforces complex policy requirements, detecting violations with high accuracy.
-- **Retrieval-Augmented Generation (RAG)**: Uses vector embeddings to find and reuse results from similar job postings for efficiency and consistency. Successful classifications are embedded and added to the database for quicker classification in subsequent requests.
-- **Vector Database**: Uses Chroma, a dedicated vector database, for efficient similarity search and storage of job posting embeddings.
-- **Flexible Policy Schema**: Supports both `StandardViolation` and `SafetyViolation` types for nuanced violation reporting.
-- **Async FastAPI Backend**: High-performance, async API for real-time job posting checks.
-- **Seeding & Testing**: Includes scripts to seed the database with example job postings and policies.
+Install and migrate the backend:
 
-## System Architecture
-
-### AI Agent Design
-The PolicyKit AI agent follows the following design:
-
-<div style="display: flex; justify-content: space-between;">
-    <img src="docs/images/Agent_Design_Left.png" alt="PolicyKit AI Agent Architecture - Left Side" style="width: 40%;""">
-    <img src="docs/images/Agent_Design_right.png" alt="PolicyKit AI Agent Architecture - Right Side" style="width: 49%;""">
-</div>
-
-For a detailed, interactive view of the system architecture, you can open the [PolicyKit.drawio](PolicyKit.drawio) file in [draw.io](https://app.diagrams.net/)
-
-# Design Choices Explanation
-
-## 1. **Input Validation and Safety Checks**
-
-I began by validating that the input is indeed a job posting and safe to process. This included checking for prompt injection or other potentially malicious input. I implemented a **gating mechanism** to enforce this safety, inspired by the gating design pattern:
-
-> ![Gating Pattern](https://github.com/user-attachments/assets/afbefe68-c2eb-4240-9704-67ed504f6bc4)
-
-FYI, this pattern is described in Anthropic's article on [Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents), which I have used as a building block for everything I've since learned about AI agents
-
----
-
-## 2. **Using a Vector Database as a Semantic Cache**
-
-I used **ChromaDB** as a vector database — not for traditional RAG in the usual sense, but as a **semantic cache**.
-
-Initially, I considered using RAG to retrieve relevant policies. However, I realized that this approach assumes the input (job posting) is semantically similar to the policies it's meant to comply with. That's often **not the case** — especially when a job post *violates* a policy. For example, a job offering "420-themed rewards" is unlikely to be semantically close to "mentions of illegal substances are prohibited."
-
-Therefore:
-- I embedded **edge cases** like job postings that subtly violate policies
-- I stored **classified job postings** in the vector DB. Since most postings follow consistent patterns, this allows the vector DB to function as a **semantic cache**. The more data the system sees, the faster and smarter it becomes.
-- This enables **fast short-circuiting**: if a new posting is similar to a previously classified one, we can retrieve that result instantly without running the full classification pipeline again.
-
-There are currently two **concerns** with this RAG approach that can be improved:
-1. In the current implementation, the Agent's response is immediately stored in the VectorDB. This introduces a potential flaw: if a job posting is misclassified once, similar future postings may also be misclassified due to reliance on that incorrect embedding. Given more time, I would modify this by queuing results for potential human review. Only classifications confirmed to be correct would then be added to the VectorDB.
-2. Job posting embeddings are static, but policies can evolve. A job that was compliant yesterday might violate new rules today. To address this, I would store either a timestamp or a version tag alongside each embedding. This would allow us to reclassify or invalidate older embeddings when policy changes are introduced.
----
-
-## 3. **Fallback: Orchestrator-Worker Model for New or Uncached Inputs**
-
-If the vector search doesn't return a confident classification (i.e., it's a **new or rare case**), the system falls back to a **multi-agent architecture** using an **Orchestrator-Worker pattern**:
-
-> ![Orchestrator Diagram](https://github.com/user-attachments/assets/852dc5af-211e-4c4c-86c6-d44654edea9e)
-
-Here's how it works:
-- The **Orchestrator** is given a high-level overview: a summary of each policy category and what it covers.
-- Based on the job posting, it dynamically selects relevant categories and **spawns Workers** to investigate each one.
-- Each **Worker** receives the **full list of policies** within their category and performs a detailed compliance check.
-- All Workers run **concurrently** using `asyncio`.
-- The individual results are **aggregated and returned** to the client with the policy categories and potential violations clearly identified.
-
----
-
-## Setup
-
-### 1. Install Dependencies
-- Create and activate a Python virtual environment:
-  ```sh
-  python3 -m venv venv
-  source venv/bin/activate
-  ```
-- Install Python dependencies:
-  ```sh
-  cd server
-  pip install -r requirements.txt
-  ```
-- Install PostgreSQL:
-  ```sh
-  brew install postgresql
-  ```
-
-### 2. Database Setup
-- Ensure PostgreSQL is running and create the database:
-  ```sh
-  createdb policykit
-  ```
-- Run migrations:
-  ```sh
-  cd server
-  alembic upgrade head
-  ```
-
-### 3. Seeding the Database
-The project includes several seeding scripts to populate the database with initial data:
-
-#### a. Seed Policies
-To seed the database with policy categories and their respective policies:
-```sh
+```bash
 cd server
-python -m app.scripts.seed_policies
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/alembic upgrade head
+.venv/bin/python -m app.scripts.seed_data
 ```
 
-#### b. Seed Job Postings
-This script populates the database with example job postings and their embeddings for RAG:
-```sh
+Start the API and its in-process durable worker:
+
+```bash
 cd server
-python -m app.scripts.seed_job_postings
+.venv/bin/uvicorn app.main:app --reload --port 8000
 ```
 
-## API Usage
+Install and start the web app in another terminal:
 
-### Check a Job Posting
-Send a POST request to `/api/v1/check-posting`:
-```sh
-curl -X POST http://localhost:8000/api/v1/check-posting \
-  -H "Content-Type: application/json" \
-  -d '{"job_description": "Looking for a young, energetic female candidate to join our team. Must be under 30 years old."}'
+```bash
+cd client
+npm install
+npm run dev
 ```
 
-### Check an Image
-Send a POST request to `/api/v1/check-image`:
-```sh
-curl -X POST http://localhost:8000/api/v1/check-image \
-  -H "Content-Type: multipart/form-data" \
-  -F "image=@path/to/image.jpg"
+Open [http://localhost:3000](http://localhost:3000). FastAPI documentation is available
+at [http://localhost:8000/api/v1/openapi.json](http://localhost:8000/api/v1/openapi.json).
+
+PostgreSQL can also be started with `docker compose up -d postgres` when Docker is
+available. ChromaDB uses an embedded persistent database under `.data/chroma` by default.
+
+## Policy administration
+
+An administrator creates a draft policy with a stable key, complete rule, scope,
+remediation, exceptions, and both violation and compliant examples. Publishing creates an
+immutable version and a new policy snapshot. Prior sessions continue to reference their
+original snapshot.
+
+Policy states are:
+
+```text
+draft -> testing -> published -> retired
 ```
 
-## Development & Testing
-- Run tests with pytest:
-  ```sh
-  cd server
-  python -m pytest tests/api/test_policy_api.py -v -s
-  ```
+Published versions cannot be edited. Creating a new draft copies the latest version so an
+administrator can test and publish a replacement.
 
-## License
-MIT 
+## Agent tools
+
+The orchestrator can call:
+
+- `resolve_scope`
+- `set_hiring_locations`
+- `run_compliance_check`
+- `search_policies`
+- `read_policy`
+- `search_reviewed_precedents`
+- `propose_revision`
+- `ask_recruiter`
+- `escalate_to_reviewer`
+- `complete_session`
+
+Tool arguments are strict JSON schemas. Every call and result is stored as an agent step.
+The agent has a fixed step budget and interrupted runs are recovered from PostgreSQL.
+
+## Validation
+
+Backend checks do not use API credit:
+
+```bash
+cd server
+.venv/bin/ruff check app tests
+.venv/bin/ruff format --check app tests
+.venv/bin/pytest -q
+```
+
+Frontend checks:
+
+```bash
+cd client
+npm run lint
+npm run typecheck
+npm run build
+```
+
+Live evals are opt-in because they use the configured OpenAI account. See
+[docs/evaluation.md](docs/evaluation.md).
+
+## Architecture
+
+See [docs/architecture.md](docs/architecture.md) for the data model, request flow, tool
+boundaries, failure behavior, and extension points.
