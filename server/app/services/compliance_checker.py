@@ -1,12 +1,20 @@
 """Constrained full-policy compliance check and deterministic validation."""
 
+import hashlib
+import json
 from dataclasses import dataclass
 from time import monotonic
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.openai_gateway import AIGateway
-from app.models.entities import ComplianceFinding, ComplianceSession, PolicyVersion
+from app.models.entities import (
+    ComplianceCacheEntry,
+    ComplianceFinding,
+    ComplianceSession,
+    PolicyVersion,
+)
 from app.repositories import policies as policy_repository
 from app.repositories import sessions as session_repository
 from app.schemas.ai import ComplianceCheckOutput
@@ -28,8 +36,8 @@ def policy_payload(version: PolicyVersion) -> dict:
     return {
         "policy_id": version.id,
         "policy_key": version.policy.key,
-        "title": version.policy.title,
-        "category": version.policy.category,
+        "title": version.title,
+        "category": version.category,
         "rule": version.rule_text,
         "rationale": version.rationale,
         "remediation": version.remediation,
@@ -85,16 +93,45 @@ async def run_compliance_check(
     if not policies:
         raise InvalidComplianceOutputError("No applicable policies were found")
 
-    started = monotonic()
-    result = await ai.check_compliance(
-        posting=session.current_posting_version.content,
-        policies=[policy_payload(policy) for policy in policies],
+    cache_input = {
+        "posting": session.current_posting_version.content,
+        "policy_snapshot_id": session.policy_snapshot_id,
+        "policy_version_ids": sorted(policy.id for policy in policies),
+        "model_namespace": ai.checker_cache_namespace,
+    }
+    cache_key = hashlib.sha256(json.dumps(cache_input, sort_keys=True).encode("utf-8")).hexdigest()
+    cached = await db.scalar(
+        select(ComplianceCacheEntry).where(ComplianceCacheEntry.cache_key == cache_key)
     )
+    started = monotonic()
+    if cached:
+        output = ComplianceCheckOutput.model_validate(cached.result)
+        response_id = "exact-cache"
+        input_tokens = 0
+        output_tokens = 0
+    else:
+        model_result = await ai.check_compliance(
+            posting=session.current_posting_version.content,
+            policies=[policy_payload(policy) for policy in policies],
+        )
+        output = model_result.output
+        response_id = model_result.response_id
+        input_tokens = model_result.input_tokens
+        output_tokens = model_result.output_tokens
     duration_ms = round((monotonic() - started) * 1_000)
-    if result.output.input_type != "job_posting":
+    if output.input_type != "job_posting":
         raise InvalidComplianceOutputError("The submitted content is not a job posting")
-    validate_model_output(session.current_posting_version.content, policies, result.output)
-    findings = await session_repository.replace_findings(db, session, result.output.assessments)
+    validate_model_output(session.current_posting_version.content, policies, output)
+    if not cached:
+        db.add(
+            ComplianceCacheEntry(
+                cache_key=cache_key,
+                policy_snapshot_id=session.policy_snapshot_id,
+                model_namespace=ai.checker_cache_namespace,
+                result=output.model_dump(mode="json"),
+            )
+        )
+    findings = await session_repository.replace_findings(db, session, output.assessments)
     await session_repository.add_step(
         db,
         session.id,
@@ -105,16 +142,15 @@ async def run_compliance_check(
             "policy_keys": [policy.policy.key for policy in policies],
         },
         output_data={
-            "summary": result.output.summary,
-            "violation_count": sum(
-                finding.status == "violation" for finding in findings
-            ),
+            "summary": output.summary,
+            "violation_count": sum(finding.status == "violation" for finding in findings),
             "uncertain_count": sum(finding.status == "uncertain" for finding in findings),
-            "response_id": result.response_id,
+            "response_id": response_id,
+            "cache_hit": cached is not None,
         },
         duration_ms=duration_ms,
-        input_tokens=result.input_tokens,
-        output_tokens=result.output_tokens,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
     )
     await db.commit()
-    return ComplianceCheckResult(output=result.output, policies=policies, findings=findings)
+    return ComplianceCheckResult(output=output, policies=policies, findings=findings)

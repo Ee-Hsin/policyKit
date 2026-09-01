@@ -1,8 +1,9 @@
 """Compliance-session persistence."""
 
 from collections.abc import Sequence
+from datetime import timedelta
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -24,6 +25,7 @@ from app.models.entities import (
 )
 from app.schemas.ai import PolicyAssessment, ProposedRevision
 from app.schemas.sessions import ComplianceSessionCreate
+from app.services.jurisdictions import resolve_jurisdictions
 
 
 class SessionNotFoundError(LookupError):
@@ -78,7 +80,12 @@ async def get_session(db: AsyncSession, session_id: str) -> ComplianceSession:
 async def list_sessions(
     db: AsyncSession, *, statuses: Sequence[str] | None = None
 ) -> list[ComplianceSession]:
-    statement = select(ComplianceSession).options(selectinload(ComplianceSession.posting))
+    statement = select(ComplianceSession).options(
+        selectinload(ComplianceSession.posting).selectinload(JobPosting.versions),
+        selectinload(ComplianceSession.current_posting_version),
+        selectinload(ComplianceSession.policy_snapshot),
+        selectinload(ComplianceSession.steps),
+    )
     if statuses:
         statement = statement.where(ComplianceSession.status.in_(statuses))
     result = await db.scalars(statement.order_by(ComplianceSession.updated_at.desc()))
@@ -102,6 +109,24 @@ async def claim_next_queued_session(db: AsyncSession) -> ComplianceSession | Non
     session.error_message = None
     await db.commit()
     return await get_session(db, session.id)
+
+
+async def recover_stale_sessions(db: AsyncSession, stale_after_seconds: int) -> int:
+    stale_before = utc_now() - timedelta(seconds=stale_after_seconds)
+    result = await db.execute(
+        update(ComplianceSession)
+        .where(
+            ComplianceSession.status == ComplianceSessionStatus.INVESTIGATING.value,
+            ComplianceSession.updated_at < stale_before,
+        )
+        .values(
+            status=ComplianceSessionStatus.QUEUED.value,
+            error_message="Recovered after an interrupted agent run.",
+            updated_at=utc_now(),
+        )
+    )
+    await db.commit()
+    return result.rowcount or 0
 
 
 async def add_step(
@@ -146,9 +171,7 @@ async def findings_for_session(
     statement = (
         select(ComplianceFinding)
         .where(ComplianceFinding.session_id == session_id)
-        .options(
-            selectinload(ComplianceFinding.policy_version).selectinload(PolicyVersion.policy)
-        )
+        .options(selectinload(ComplianceFinding.policy_version).selectinload(PolicyVersion.policy))
         .order_by(ComplianceFinding.created_at)
     )
     if posting_version_id:
@@ -187,9 +210,7 @@ async def replace_findings(
     return findings
 
 
-async def proposed_changes_for_session(
-    db: AsyncSession, session_id: str
-) -> list[ProposedChange]:
+async def proposed_changes_for_session(db: AsyncSession, session_id: str) -> list[ProposedChange]:
     return list(
         await db.scalars(
             select(ProposedChange)
@@ -271,9 +292,7 @@ async def record_revision_decision(
     await db.commit()
 
 
-async def record_user_message(
-    db: AsyncSession, session: ComplianceSession, message: str
-) -> None:
+async def record_user_message(db: AsyncSession, session: ComplianceSession, message: str) -> None:
     await add_step(
         db,
         session.id,
@@ -305,13 +324,14 @@ async def add_human_review(
     await db.flush()
     if precedent:
         finding, excerpt = precedent
+        jurisdictions, _ = resolve_jurisdictions(session.posting.target_locations)
         db.add(
             ReviewedPrecedent(
                 human_review_id=review.id,
                 excerpt=excerpt,
                 decision=decision,
-                jurisdiction=(session.posting.target_locations or ["GLOBAL"])[0],
-                category=finding.policy_version.policy.category,
+                jurisdiction=(jurisdictions or ["GLOBAL"])[0],
+                category=finding.policy_version.category,
                 policy_version_id=finding.policy_version_id,
             )
         )

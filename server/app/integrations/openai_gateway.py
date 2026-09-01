@@ -23,6 +23,9 @@ class ComplianceModelResult:
 
 
 class AIGateway(Protocol):
+    @property
+    def checker_cache_namespace(self) -> str: ...
+
     async def run_agent(
         self, *, instructions: str, state: dict[str, Any], tools: list[dict[str, Any]]
     ) -> AgentTurn: ...
@@ -42,6 +45,10 @@ class OpenAIGateway:
             )
         self.settings = settings
         self.client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+    @property
+    def checker_cache_namespace(self) -> str:
+        return f"{self.settings.openai_checker_model}:full-policy-check-v1"
 
     async def run_agent(
         self, *, instructions: str, state: dict[str, Any], tools: list[dict[str, Any]]
@@ -63,9 +70,7 @@ class OpenAIGateway:
                 arguments = json.loads(item.arguments)
             except json.JSONDecodeError as error:
                 raise ValueError(f"Agent returned invalid arguments for {item.name}") from error
-            tool_calls.append(
-                ToolCall(call_id=item.call_id, name=item.name, arguments=arguments)
-            )
+            tool_calls.append(ToolCall(call_id=item.call_id, name=item.name, arguments=arguments))
         usage = response.usage
         return AgentTurn(
             response_id=response.id,

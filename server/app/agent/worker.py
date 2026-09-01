@@ -23,6 +23,12 @@ class AgentWorker:
         self._stop.set()
 
     async def run_forever(self) -> None:
+        async with SessionFactory() as db:
+            recovered = await session_repository.recover_stale_sessions(
+                db, self.settings.agent_stale_after_seconds
+            )
+            if recovered:
+                logger.info("Recovered %s interrupted compliance sessions", recovered)
         while not self._stop.is_set():
             worked = await self.run_once()
             if not worked:

@@ -27,9 +27,7 @@ from app.schemas.sessions import (
 router = APIRouter()
 
 
-async def session_response(
-    db: AsyncSession, session: ComplianceSession
-) -> ComplianceSessionRead:
+async def session_response(db: AsyncSession, session: ComplianceSession) -> ComplianceSessionRead:
     findings = await repository.findings_for_session(
         db, session.id, posting_version_id=session.current_posting_version_id
     )
@@ -48,9 +46,7 @@ async def session_response(
         policy_snapshot_version=(
             session.policy_snapshot.version if session.policy_snapshot else None
         ),
-        current_posting_version=PostingVersionRead.model_validate(
-            session.current_posting_version
-        ),
+        current_posting_version=PostingVersionRead.model_validate(session.current_posting_version),
         posting_versions=[
             PostingVersionRead.model_validate(version) for version in session.posting.versions
         ],
@@ -58,8 +54,8 @@ async def session_response(
             FindingRead(
                 id=finding.id,
                 policy_key=finding.policy_version.policy.key,
-                policy_title=finding.policy_version.policy.title,
-                category=finding.policy_version.policy.category,
+                policy_title=finding.policy_version.title,
+                category=finding.policy_version.category,
                 status=finding.status,
                 evidence_text=finding.evidence_text,
                 evidence_start=finding.evidence_start,
@@ -120,9 +116,7 @@ async def list_sessions(db: AsyncSession = Depends(get_db)) -> list[SessionListI
 
 
 @router.get("/{session_id}", response_model=ComplianceSessionRead)
-async def get_session(
-    session_id: str, db: AsyncSession = Depends(get_db)
-) -> ComplianceSessionRead:
+async def get_session(session_id: str, db: AsyncSession = Depends(get_db)) -> ComplianceSessionRead:
     try:
         return await session_response(db, await repository.get_session(db, session_id))
     except repository.SessionNotFoundError as error:
@@ -191,7 +185,7 @@ async def stream_session_events(session_id: str, request: Request) -> StreamingR
                     session = await repository.get_session(db, session_id)
                     payload = await session_response(db, session)
                 except repository.SessionNotFoundError:
-                    yield "event: error\ndata: {\"detail\": \"Session not found\"}\n\n"
+                    yield 'event: error\ndata: {"detail": "Session not found"}\n\n'
                     return
             serialized = payload.model_dump_json()
             signature = f"{payload.status}:{len(payload.steps)}:{payload.updated_at}"

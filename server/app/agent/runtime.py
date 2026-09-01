@@ -47,8 +47,8 @@ class AgentToolError(ValueError):
 def _version_payload(version: PolicyVersion) -> dict[str, Any]:
     return {
         "policy_key": version.policy.key,
-        "title": version.policy.title,
-        "category": version.policy.category,
+        "title": version.title,
+        "category": version.category,
         "version": version.version,
         "rule": version.rule_text,
         "rationale": version.rationale,
@@ -91,8 +91,8 @@ async def build_agent_state(db: AsyncSession, session: ComplianceSession) -> dic
         "current_findings": [
             {
                 "policy_key": finding.policy_version.policy.key,
-                "title": finding.policy_version.policy.title,
-                "category": finding.policy_version.policy.category,
+                "title": finding.policy_version.title,
+                "category": finding.policy_version.category,
                 "status": finding.status,
                 "evidence": finding.evidence_text,
                 "reason": finding.reason,
@@ -147,13 +147,16 @@ class AgentToolExecutor:
         handler = getattr(self, f"_tool_{name}", None)
         if handler is None:
             raise AgentToolError(f"Unknown tool {name}")
+        session_id = self.session.id
         started = monotonic()
         try:
             result = await handler(arguments)
         except Exception as error:
+            await self.db.rollback()
+            self.session = await session_repository.get_session(self.db, session_id)
             await session_repository.add_step(
                 self.db,
-                self.session.id,
+                session_id,
                 kind="tool",
                 name=name,
                 input_data=arguments,
@@ -162,7 +165,7 @@ class AgentToolExecutor:
                 duration_ms=round((monotonic() - started) * 1_000),
             )
             await self.db.commit()
-            raise
+            return {"error": str(error), "retryable": True}
         if name != "run_compliance_check":
             await session_repository.add_step(
                 self.db,
@@ -217,9 +220,7 @@ class AgentToolExecutor:
         where = None
         if arguments.get("category"):
             where = {"category": arguments["category"]}
-        matches = await self.index.search(
-            "policy_chunks", arguments["query"], limit=5, where=where
-        )
+        matches = await self.index.search("policy_chunks", arguments["query"], limit=5, where=where)
         valid: list[dict[str, Any]] = []
         for match in matches:
             version = await self.db.scalar(
@@ -240,8 +241,8 @@ class AgentToolExecutor:
             valid.append(
                 {
                     "policy_key": version.policy.key,
-                    "title": version.policy.title,
-                    "category": version.policy.category,
+                    "title": version.title,
+                    "category": version.category,
                     "passage": match.text,
                     "distance": match.distance,
                 }
@@ -257,9 +258,7 @@ class AgentToolExecutor:
             raise AgentToolError("Policy does not have a published version")
         return _version_payload(max(published, key=lambda item: item.version))
 
-    async def _tool_search_reviewed_precedents(
-        self, arguments: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def _tool_search_reviewed_precedents(self, arguments: dict[str, Any]) -> dict[str, Any]:
         where = None
         if arguments.get("category"):
             where = {"category": arguments["category"]}

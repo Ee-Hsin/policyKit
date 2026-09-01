@@ -6,6 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class PolicyVersionFields(BaseModel):
+    title: str = Field(min_length=3, max_length=240)
+    category: str = Field(min_length=2, max_length=80)
     rule_text: str = Field(min_length=10)
     rationale: str | None = None
     remediation: str | None = None
@@ -22,13 +24,23 @@ class PolicyVersionFields(BaseModel):
 
 class PolicyCreate(PolicyVersionFields):
     key: str = Field(pattern=r"^[A-Z0-9][A-Z0-9_-]{2,79}$")
-    title: str = Field(min_length=3, max_length=240)
-    category: str = Field(min_length=2, max_length=80)
 
 
-class PolicyDraftUpdate(PolicyVersionFields):
+class PolicyDraftUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=3, max_length=240)
     category: str | None = Field(default=None, min_length=2, max_length=80)
+    rule_text: str | None = Field(default=None, min_length=10)
+    rationale: str | None = None
+    remediation: str | None = None
+    enforcement_level: str | None = None
+    jurisdictions: list[str] | None = None
+    employment_types: list[str] | None = None
+    platforms: list[str] | None = None
+    violation_examples: list[str] | None = None
+    compliant_examples: list[str] | None = None
+    exceptions: list[str] | None = None
+    effective_at: datetime | None = None
+    expires_at: datetime | None = None
 
 
 class PolicyVersionRead(PolicyVersionFields):

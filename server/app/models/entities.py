@@ -77,8 +77,6 @@ class Policy(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     key: Mapped[str] = mapped_column(String(80), unique=True, index=True)
-    title: Mapped[str] = mapped_column(String(240))
-    category: Mapped[str] = mapped_column(String(80), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     versions: Mapped[list[PolicyVersion]] = relationship(
@@ -95,6 +93,8 @@ class PolicyVersion(Base):
         ForeignKey("policies.id", ondelete="CASCADE"), index=True
     )
     version: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(240))
+    category: Mapped[str] = mapped_column(String(80), index=True)
     status: Mapped[str] = mapped_column(String(24), default=PolicyStatus.DRAFT.value, index=True)
     rule_text: Mapped[str] = mapped_column(Text)
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -326,4 +326,17 @@ class EvalCase(Base):
     expected_assessments: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     source: Mapped[str] = mapped_column(String(40), default="authored")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ComplianceCacheEntry(Base):
+    __tablename__ = "compliance_cache_entries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    cache_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    policy_snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("policy_snapshots.id", ondelete="CASCADE"), index=True
+    )
+    model_namespace: Mapped[str] = mapped_column(String(160))
+    result: Mapped[dict[str, Any]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

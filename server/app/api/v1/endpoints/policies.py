@@ -25,11 +25,12 @@ router = APIRouter()
 
 
 def policy_detail(policy: Policy) -> PolicyDetail:
+    current = max(policy.versions, key=lambda version: version.version)
     return PolicyDetail(
         id=policy.id,
         key=policy.key,
-        title=policy.title,
-        category=policy.category,
+        title=current.title,
+        category=current.category,
         versions=[PolicyVersionRead.model_validate(version) for version in policy.versions],
     )
 
@@ -39,8 +40,8 @@ def policy_summary(policy: Policy) -> PolicySummary:
     return PolicySummary(
         id=policy.id,
         key=policy.key,
-        title=policy.title,
-        category=policy.category,
+        title=current.title,
+        category=current.category,
         current_version=current.version,
         status=current.status,
         index_status=current.index_status,
@@ -61,9 +62,7 @@ async def list_policies(db: AsyncSession = Depends(get_db)) -> list[PolicySummar
 
 
 @router.post("", response_model=PolicyDetail, status_code=status.HTTP_201_CREATED)
-async def create_policy(
-    request: PolicyCreate, db: AsyncSession = Depends(get_db)
-) -> PolicyDetail:
+async def create_policy(request: PolicyCreate, db: AsyncSession = Depends(get_db)) -> PolicyDetail:
     try:
         return policy_detail(await repository.create_policy(db, request))
     except (repository.PolicyStateError, repository.PolicyNotFoundError) as error:
@@ -92,18 +91,14 @@ async def update_policy_draft(
 
 
 @router.post("/{policy_id}/versions", response_model=PolicyDetail, status_code=201)
-async def create_policy_version(
-    policy_id: str, db: AsyncSession = Depends(get_db)
-) -> PolicyDetail:
+async def create_policy_version(policy_id: str, db: AsyncSession = Depends(get_db)) -> PolicyDetail:
     try:
         return policy_detail(await repository.create_draft_version(db, policy_id))
     except (repository.PolicyStateError, repository.PolicyNotFoundError) as error:
         raise handle_repository_error(error) from error
 
 
-@router.post(
-    "/{policy_id}/versions/{version_id}/test", response_model=PolicyTestResponse
-)
+@router.post("/{policy_id}/versions/{version_id}/test", response_model=PolicyTestResponse)
 async def test_policy_version(
     policy_id: str,
     version_id: str,
@@ -135,9 +130,7 @@ async def test_policy_version(
     )
 
 
-@router.post(
-    "/{policy_id}/versions/{version_id}/publish", response_model=PublishPolicyResponse
-)
+@router.post("/{policy_id}/versions/{version_id}/publish", response_model=PublishPolicyResponse)
 async def publish_policy_version(
     policy_id: str, version_id: str, db: AsyncSession = Depends(get_db)
 ) -> PublishPolicyResponse:

@@ -31,8 +31,8 @@ async def create_policy(db: AsyncSession, data: PolicyCreate) -> Policy:
     if existing:
         raise PolicyStateError(f"Policy key {data.key} already exists")
 
-    policy = Policy(key=data.key, title=data.title, category=data.category)
-    version_fields = data.model_dump(exclude={"key", "title", "category"})
+    policy = Policy(key=data.key)
+    version_fields = data.model_dump(exclude={"key"})
     policy.versions.append(PolicyVersion(version=1, **version_fields))
     db.add(policy)
     await db.commit()
@@ -41,9 +41,7 @@ async def create_policy(db: AsyncSession, data: PolicyCreate) -> Policy:
 
 async def get_policy(db: AsyncSession, policy_id: str) -> Policy:
     policy = await db.scalar(
-        select(Policy)
-        .where(Policy.id == policy_id)
-        .options(selectinload(Policy.versions))
+        select(Policy).where(Policy.id == policy_id).options(selectinload(Policy.versions))
     )
     if not policy:
         raise PolicyNotFoundError(policy_id)
@@ -61,7 +59,7 @@ async def get_policy_by_key(db: AsyncSession, key: str) -> Policy:
 
 async def list_policies(db: AsyncSession) -> list[Policy]:
     result = await db.scalars(
-        select(Policy).options(selectinload(Policy.versions)).order_by(Policy.category, Policy.key)
+        select(Policy).options(selectinload(Policy.versions)).order_by(Policy.key)
     )
     return list(result.unique())
 
@@ -77,12 +75,6 @@ async def update_draft(
         raise PolicyStateError("Published policy versions are immutable")
 
     values = data.model_dump(exclude_unset=True)
-    title = values.pop("title", None)
-    category = values.pop("category", None)
-    if title is not None:
-        policy.title = title
-    if category is not None:
-        policy.category = category
     for field, value in values.items():
         setattr(version, field, value)
     await db.commit()
@@ -95,6 +87,8 @@ async def create_draft_version(db: AsyncSession, policy_id: str) -> Policy:
         raise PolicyStateError("This policy already has a draft version")
     latest = max(policy.versions, key=lambda item: item.version)
     fields = {
+        "title": latest.title,
+        "category": latest.category,
         "rule_text": latest.rule_text,
         "rationale": latest.rationale,
         "remediation": latest.remediation,
@@ -148,8 +142,12 @@ async def publish_policy_version(
     )
     if version not in active_versions:
         active_versions.append(version)
-    for active_version in active_versions:
-        snapshot.items.append(PolicySnapshotItem(policy_version_id=active_version.id))
+    db.add_all(
+        [
+            PolicySnapshotItem(snapshot_id=snapshot.id, policy_version_id=active_version.id)
+            for active_version in active_versions
+        ]
+    )
 
     await db.commit()
     return await get_policy(db, policy_id), await get_snapshot(db, snapshot.id)
@@ -211,9 +209,7 @@ async def applicable_policy_versions(
     return [
         item.policy_version
         for item in snapshot.items
-        if policy_applies(
-            item.policy_version, jurisdictions, employment_type, platform, check_time
-        )
+        if policy_applies(item.policy_version, jurisdictions, employment_type, platform, check_time)
     ]
 
 
@@ -226,7 +222,7 @@ async def search_canonical_policies(
         .options(selectinload(PolicyVersion.policy))
     )
     if category:
-        statement = statement.join(Policy).where(func.lower(Policy.category) == category.lower())
+        statement = statement.where(func.lower(PolicyVersion.category) == category.lower())
     versions = list(await db.scalars(statement))
     if jurisdiction:
         needle = jurisdiction.upper()

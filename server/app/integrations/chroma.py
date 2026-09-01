@@ -61,11 +61,11 @@ class ChromaIndex:
         text = "\n".join(
             part
             for part in [
-                version.policy.title,
+                version.title,
                 version.rule_text,
-                "Violation examples: " + " | ".join(version.violation_examples),
-                "Compliant examples: " + " | ".join(version.compliant_examples),
-                "Exceptions: " + " | ".join(version.exceptions),
+                "Violation examples: " + " | ".join(version.violation_examples or []),
+                "Compliant examples: " + " | ".join(version.compliant_examples or []),
+                "Exceptions: " + " | ".join(version.exceptions or []),
             ]
             if part and not part.endswith(": ")
         )
@@ -80,8 +80,8 @@ class ChromaIndex:
                     "policy_key": version.policy.key,
                     "policy_version_id": version.id,
                     "version": version.version,
-                    "category": version.policy.category,
-                    "jurisdictions": ",".join(version.jurisdictions),
+                    "category": version.category,
+                    "jurisdictions": ",".join(version.jurisdictions or []),
                 }
             ],
         )

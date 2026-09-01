@@ -2,6 +2,7 @@
 
 from app.models.entities import (
     AgentStep,
+    ComplianceCacheEntry,
     ComplianceFinding,
     ComplianceSession,
     EvalCase,
@@ -18,6 +19,7 @@ from app.models.entities import (
 
 __all__ = [
     "AgentStep",
+    "ComplianceCacheEntry",
     "ComplianceFinding",
     "ComplianceSession",
     "EvalCase",
