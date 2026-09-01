@@ -1,10 +1,11 @@
 """Script to seed example job postings with embeddings."""
 
 import asyncio
-from app.core.database import async_session_factory
+
+from app.schemas.policy import StandardViolation
 from app.services.embedding_service import EmbeddingService
-from app.schemas.policy import StandardViolation, SafetyKitViolation
-import json
+
+from app.core.database import async_session_factory
 
 # Example job postings
 EXAMPLE_POSTINGS = [

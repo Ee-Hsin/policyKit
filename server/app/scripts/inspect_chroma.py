@@ -1,8 +1,10 @@
 """Script to inspect the contents of ChromaDB."""
 
 import asyncio
-from app.core.vector_store import ChromaVectorStore
 import json
+
+from app.core.vector_store import ChromaVectorStore
+
 
 async def inspect_chroma():
     """Inspect the contents of ChromaDB."""

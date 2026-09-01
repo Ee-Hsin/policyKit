@@ -1,5 +1,6 @@
 # Python virtual environment
 venv/
+.venv/
 env/
 ENV/
 
@@ -37,9 +38,18 @@ Thumbs.db
 .coverage
 htmlcov/
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
 # Logs
 *.log
 
 # Project specific
-todo.txt 
+todo.txt
+.data/
+
+# Frontend
+node_modules/
+.next/
+out/
+*.tsbuildinfo

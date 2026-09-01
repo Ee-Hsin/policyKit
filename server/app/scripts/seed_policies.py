@@ -1,9 +1,11 @@
 """Script to seed the database with comprehensive policies and categories."""
 
 import asyncio
-from sqlalchemy import select
-from app.core.database import async_session_factory
+
 from app.models.policy import Policy, PolicyCategory
+from sqlalchemy import select
+
+from app.core.database import async_session_factory
 
 # Define new categories and policies
 CATEGORIES = [
