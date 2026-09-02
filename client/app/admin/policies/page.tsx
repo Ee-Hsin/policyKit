@@ -74,6 +74,11 @@ export default function PoliciesPage() {
                         <strong>{policy.title}</strong>
                         <span>{policy.key} · {labelize(policy.category)}</span>
                       </Link>
+                      <div className="policy-mobile-meta">
+                        <span>{policy.jurisdictions.slice(0, 2).join(", ")}</span>
+                        <span>v{policy.current_version}</span>
+                        <span>{labelize(policy.status)}</span>
+                      </div>
                     </td>
                     <td><div className="tag-row">{policy.jurisdictions.slice(0, 3).map((item) => <span className="tag" key={item}>{item}</span>)}</div></td>
                     <td>v{policy.current_version}</td>

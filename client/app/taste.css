@@ -48,6 +48,7 @@
 html {
   background: var(--paper);
   font-family: "Satoshi", "Helvetica Neue", Arial, sans-serif;
+  overflow-x: hidden;
   scroll-behavior: smooth;
 }
 
@@ -56,6 +57,7 @@ body {
     radial-gradient(circle at 7% 4%, rgba(185, 244, 217, 0.26), transparent 31rem),
     radial-gradient(circle at 92% 36%, rgba(215, 255, 98, 0.12), transparent 26rem),
     var(--paper);
+  overflow-x: hidden;
 }
 
 .app-main,
@@ -236,7 +238,7 @@ body {
 }
 
 .home-hero h1 {
-  font-size: clamp(3.5rem, 6.4vw, 7.1rem);
+  font-size: clamp(3.5rem, 5.25vw, 6.6rem);
   font-weight: 500;
   letter-spacing: -0.072em;
   line-height: 0.9;
@@ -1194,6 +1196,10 @@ body {
   background: #f0f4eb;
 }
 
+.policy-mobile-meta {
+  display: none;
+}
+
 .row-arrow {
   align-items: center;
   background: var(--ink);
@@ -1328,7 +1334,7 @@ body {
   color: var(--ink);
 }
 
-@media (max-width: 1380px) {
+@media (max-width: 1100px) {
   .home-hero {
     grid-template-columns: 1fr;
     min-height: auto;
@@ -1624,6 +1630,78 @@ body {
   .composer-card {
     border-radius: 20px;
     padding: 23px 18px;
+  }
+
+  .table-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+  }
+
+  .table-toolbar > span {
+    align-self: flex-end;
+  }
+
+  .policy-table-wrap {
+    max-width: 100%;
+  }
+
+  .policy-table {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .policy-table thead,
+  .policy-table td:nth-child(2),
+  .policy-table td:nth-child(3),
+  .policy-table td:nth-child(4),
+  .policy-table td:nth-child(5) {
+    display: none;
+  }
+
+  .policy-table tbody {
+    display: block;
+  }
+
+  .policy-table tbody tr {
+    align-items: center;
+    border-top: 1px solid var(--line);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .policy-table td {
+    border: 0;
+    min-width: 0;
+    padding: 17px 16px;
+  }
+
+  .policy-table td:first-child {
+    overflow: hidden;
+  }
+
+  .policy-table td:first-child strong,
+  .policy-table td:first-child span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .policy-mobile-meta {
+    display: flex;
+    gap: 10px;
+    margin-top: 11px;
+  }
+
+  .policy-mobile-meta span {
+    background: #eef1ea;
+    border-radius: 999px;
+    color: var(--ink-soft);
+    font-family: "Satoshi", "Helvetica Neue", sans-serif !important;
+    font-size: 9px !important;
+    font-weight: 700;
+    padding: 5px 7px;
   }
 
   .form-grid--two,
