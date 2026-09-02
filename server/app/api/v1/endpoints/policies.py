@@ -19,7 +19,11 @@ from app.schemas.policies import (
     PolicyVersionRead,
     PublishPolicyResponse,
 )
-from app.services.compliance_checker import policy_payload, validate_model_output
+from app.services.compliance_checker import (
+    normalize_evidence_offsets,
+    policy_payload,
+    validate_model_output,
+)
 
 router = APIRouter()
 
@@ -117,6 +121,7 @@ async def test_policy_version(
         result = await ai.check_compliance(
             posting=request.posting_text, policies=[policy_payload(version)]
         )
+        normalize_evidence_offsets(request.posting_text, result.output)
         validate_model_output(request.posting_text, [version], result.output)
     except MissingAIConfigurationError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error

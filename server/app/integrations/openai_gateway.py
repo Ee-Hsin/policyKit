@@ -52,7 +52,7 @@ class OpenAIGateway:
 
     @property
     def checker_cache_namespace(self) -> str:
-        return f"{self.settings.openai_checker_model}:full-policy-check-v2"
+        return f"{self.settings.openai_checker_model}:full-policy-check-v5"
 
     async def run_agent(
         self, *, instructions: str, state: dict[str, Any], tools: list[dict[str, Any]]
@@ -100,7 +100,10 @@ a job advertisement. Python has already determined that every supplied policy ap
 the posting's location, employment type, platform, and evaluation time. Do not mark a
 policy uncertain because its jurisdiction or scope is not repeated inside the posting.
 Absence of prohibited language is no_violation; do not require a posting to discuss facts
-that its wording does not put at issue.
+that its wording does not put at issue. Assess each policy independently and apply only its
+explicit rule. A violation of one policy is not evidence that another policy was violated.
+For an accuracy policy, violation evidence must itself contain a false, misleading, or
+unsupported claim. Illegal duties that are stated openly are not evidence of inaccuracy.
 """.strip()
         input_payload = {
             "posting": posting,

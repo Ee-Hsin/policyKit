@@ -109,7 +109,11 @@ async def run_live(selected_names: set[str], limit: int | None) -> int:
     from app.core.config import get_settings
     from app.integrations.openai_gateway import OpenAIGateway
     from app.repositories.policies import policy_applies
-    from app.services.compliance_checker import policy_payload, validate_model_output
+    from app.services.compliance_checker import (
+        normalize_evidence_offsets,
+        policy_payload,
+        validate_model_output,
+    )
 
     settings = get_settings()
     gateway = OpenAIGateway(settings)
@@ -144,9 +148,14 @@ async def run_live(selected_names: set[str], limit: int | None) -> int:
         )
         if response.output.input_type != "job_posting":
             raise RuntimeError(f"Checker rejected eval case {case.name} as non-job content")
+        normalize_evidence_offsets(case.posting_text, response.output)
         validate_model_output(case.posting_text, applicable, response.output)
         actual = {
             keys_by_id[assessment.policy_id]: assessment.status.value
+            for assessment in response.output.assessments
+        }
+        reasons = {
+            keys_by_id[assessment.policy_id]: assessment.reason
             for assessment in response.output.assessments
         }
         add_case_result(
@@ -159,6 +168,14 @@ async def run_live(selected_names: set[str], limit: int | None) -> int:
         metrics.output_tokens += response.output_tokens or 0
         result = "PASS" if all(actual[key] == value for key, value in expected.items()) else "FAIL"
         print(f"{result} {case.name} ({len(applicable)} policies)")
+        if result == "FAIL":
+            for policy_key, expected_status in expected.items():
+                actual_status = actual[policy_key]
+                if actual_status != expected_status:
+                    print(
+                        f"  {policy_key}: expected {expected_status}, got {actual_status}; "
+                        f"{reasons[policy_key]}"
+                    )
 
     print()
     print(f"Exact cases: {metrics.exact_cases}/{metrics.cases}")

@@ -84,9 +84,9 @@ AUTHORED_EVAL_CASES = (
     AuthoredEvalCase(
         name="contractor_classification_uncertain",
         posting_text=(
-            "Acme Delivery is seeking an independent contractor in California. The contractor "
-            "must work 9 AM to 5 PM at our office, use company equipment, and follow daily "
-            "instructions from an Acme supervisor. The hourly pay range is $30-$35 USD."
+            "Acme Delivery is seeking an independent contractor in California. The contractor's "
+            "work arrangement is not yet determined, including who controls the schedule, "
+            "equipment, supervision, and method of work. The hourly pay range is $30-$35 USD."
         ),
         jurisdictions=("US", "US-CA"),
         expected_assessments={"EMP_WORKER_CLASSIFICATION": "uncertain"},
@@ -103,8 +103,8 @@ AUTHORED_EVAL_CASES = (
     AuthoredEvalCase(
         name="illegal_activity_violation",
         posting_text=(
-            "Acme Media is seeking a contractor to obtain paid streaming content illegally and "
-            "redistribute copies without permission. The project pays $2,000 USD."
+            "Acme Media is hiring an employee to obtain paid streaming content illegally and "
+            "redistribute copies without permission. The role pays $50 USD per hour."
         ),
         jurisdictions=("US",),
         expected_assessments={"CONTENT_ILLEGAL_ACTIVITY": "violation"},
