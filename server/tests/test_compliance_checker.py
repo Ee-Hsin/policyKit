@@ -2,7 +2,11 @@ import pytest
 
 from app.models.entities import FindingStatus, PolicyVersion
 from app.schemas.ai import ComplianceCheckOutput, PolicyAssessment
-from app.services.compliance_checker import InvalidComplianceOutputError, validate_model_output
+from app.services.compliance_checker import (
+    InvalidComplianceOutputError,
+    normalize_evidence_offsets,
+    validate_model_output,
+)
 
 
 def policy_version(policy_id: str) -> PolicyVersion:
@@ -107,3 +111,22 @@ def test_rejects_evidence_that_does_not_match_posting_offsets() -> None:
                 )
             ),
         )
+
+
+def test_repairs_incorrect_offsets_for_unique_exact_evidence() -> None:
+    posting = "Recent graduates preferred for this role."
+    result = output(
+        assessment(
+            "age",
+            status=FindingStatus.VIOLATION,
+            evidence_text="graduates preferred",
+            evidence_start=0,
+            evidence_end=19,
+        )
+    )
+
+    normalize_evidence_offsets(posting, result)
+    validate_model_output(posting, [policy_version("age")], result)
+
+    assert result.assessments[0].evidence_start == 7
+    assert result.assessments[0].evidence_end == 26

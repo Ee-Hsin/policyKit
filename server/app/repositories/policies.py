@@ -1,6 +1,6 @@
 """Policy persistence and snapshot queries."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -122,6 +122,10 @@ async def publish_policy_version(
         raise PolicyStateError("Expiration must occur after the effective date")
 
     now = utc_now()
+    if version.effective_at and version.effective_at > now:
+        raise PolicyStateError(
+            "Scheduled activation is not supported; effective time must be now or earlier"
+        )
     for other in policy.versions:
         if other.status == PolicyStatus.PUBLISHED.value:
             other.status = PolicyStatus.RETIRED.value
@@ -182,6 +186,21 @@ def policy_applies(
     platform: str,
     at: datetime,
 ) -> bool:
+    check_time = at.replace(tzinfo=UTC) if at.tzinfo is None else at.astimezone(UTC)
+    effective_at = version.effective_at
+    if effective_at is not None:
+        effective_at = (
+            effective_at.replace(tzinfo=UTC)
+            if effective_at.tzinfo is None
+            else effective_at.astimezone(UTC)
+        )
+    expires_at = version.expires_at
+    if expires_at is not None:
+        expires_at = (
+            expires_at.replace(tzinfo=UTC)
+            if expires_at.tzinfo is None
+            else expires_at.astimezone(UTC)
+        )
     policy_jurisdictions = {item.upper() for item in version.jurisdictions}
     requested_jurisdictions = {item.upper() for item in jurisdictions}
     jurisdiction_match = (
@@ -191,8 +210,8 @@ def policy_applies(
     )
     employment_match = not version.employment_types or employment_type in version.employment_types
     platform_match = not version.platforms or platform in version.platforms
-    effective = version.effective_at is None or version.effective_at <= at
-    unexpired = version.expires_at is None or version.expires_at > at
+    effective = effective_at is None or effective_at <= check_time
+    unexpired = expires_at is None or expires_at > check_time
     return jurisdiction_match and employment_match and platform_match and effective and unexpired
 
 

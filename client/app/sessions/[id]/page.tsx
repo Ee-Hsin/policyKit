@@ -244,9 +244,13 @@ export default function SessionPage() {
     const source = new EventSource(`${API_BASE_URL}/compliance-sessions/${id}/events`);
     source.addEventListener("session", (event) => {
       if (!active) return;
-      setSession(JSON.parse((event as MessageEvent<string>).data) as ComplianceSession);
+      const next = JSON.parse((event as MessageEvent<string>).data) as ComplianceSession;
+      setSession(next);
       setConnected(true);
       setError("");
+      if (next.status === "published" || next.status === "failed") {
+        source.close();
+      }
     });
     source.onopen = () => setConnected(true);
     source.onerror = () => setConnected(false);
@@ -292,6 +296,7 @@ export default function SessionPage() {
 
   const activeStage = stageForStatus(session.status);
   const activeFindings = sortedFindings.filter((finding) => finding.status !== "no_violation");
+  const terminal = session.status === "published" || session.status === "failed";
 
   return (
     <div className="workspace-shell">
@@ -310,8 +315,8 @@ export default function SessionPage() {
             Policy set v{session.policy_snapshot_version ?? "—"}
           </p>
         </div>
-        <div className={`connection-state ${connected ? "connection-state--online" : ""}`}>
-          <i /> {connected ? "Live updates" : "Reconnecting"}
+        <div className={`connection-state ${connected || terminal ? "connection-state--online" : ""}`}>
+          <i /> {terminal ? "Audit saved" : connected ? "Live updates" : "Reconnecting"}
         </div>
       </div>
 

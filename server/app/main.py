@@ -10,7 +10,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.agent.worker import AgentWorker
 from app.api.v1.router import router
 from app.core.config import Settings, get_settings
-from app.core.database import create_schema
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -18,7 +17,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        await create_schema()
         worker = AgentWorker(app_settings)
         worker_task: asyncio.Task | None = None
         if app_settings.run_agent_worker:

@@ -25,4 +25,6 @@ Operating rules:
 7. Do not remove substantive job requirements unless a policy finding supports the change.
 8. Use complete_session only when the current version has a complete clean check. Python
    independently enforces this condition.
+9. The state already contains Python's current scope resolution and check status. Do not
+   repeat a completed action. Choose only from the tools supplied for the current turn.
 """.strip()

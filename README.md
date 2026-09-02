@@ -11,7 +11,7 @@ versioning, and the final publication gate.
 ## Product flow
 
 1. A recruiter submits a draft and its hiring locations.
-2. The agent resolves which jurisdictions apply.
+2. Python resolves which jurisdictions apply.
 3. The `run_compliance_check` tool loads every applicable policy from an immutable
    PostgreSQL snapshot.
 4. A constrained OpenAI call assesses every policy and cites exact posting text.
@@ -86,7 +86,9 @@ Open [http://localhost:3000](http://localhost:3000). FastAPI documentation is av
 at [http://localhost:8000/api/v1/openapi.json](http://localhost:8000/api/v1/openapi.json).
 
 PostgreSQL can also be started with `docker compose up -d postgres` when Docker is
-available. ChromaDB uses an embedded persistent database under `.data/chroma` by default.
+available. For that Docker service, set `DATABASE_URL` to
+`postgresql+asyncpg://postgres:postgres@localhost:5432/policykit`. ChromaDB uses an
+embedded persistent database under `.data/chroma` by default.
 
 ## Policy administration
 
@@ -108,7 +110,6 @@ administrator can test and publish a replacement.
 
 The orchestrator can call:
 
-- `resolve_scope`
 - `set_hiring_locations`
 - `run_compliance_check`
 - `search_policies`
@@ -137,7 +138,6 @@ Frontend checks:
 
 ```bash
 cd client
-npm run lint
 npm run typecheck
 npm run build
 ```

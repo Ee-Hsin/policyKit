@@ -118,7 +118,7 @@ async def test_session_approval_and_publish_endpoints_enforce_state(
     assert publication.json()["detail"] == "Only a ready posting can be published"
 
 
-async def test_reviewer_can_approve_an_escalated_session(
+async def test_reviewer_cannot_approve_an_unchecked_escalated_session(
     api_client: httpx.AsyncClient,
     db: AsyncSession,
     monkeypatch,
@@ -142,5 +142,5 @@ async def test_reviewer_can_approve_an_escalated_session(
             "notes": "Reviewed against the source policy.",
         },
     )
-    assert reviewed.status_code == 200
-    assert reviewed.json()["status"] == "ready_to_publish"
+    assert reviewed.status_code == 409
+    assert reviewed.json()["detail"] == ("The current draft has not completed full policy coverage")

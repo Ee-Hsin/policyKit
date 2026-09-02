@@ -52,9 +52,10 @@ ChromaDB has two derived collections:
 - `policy_chunks`
 - `reviewed_precedents`
 
-OpenAI embeddings are supplied explicitly. A result is accepted only when its source
-record and version still exist in PostgreSQL. ChromaDB can be deleted and rebuilt without
-losing business data.
+OpenAI embeddings are supplied explicitly. ChromaDB returns candidate IDs and distances
+only. Python restricts candidates to the session's pinned policy snapshot and returns the
+canonical policy text from PostgreSQL. ChromaDB can be deleted and rebuilt without losing
+business data.
 
 Search supports an investigation. It does not narrow the required full-policy check and
 does not short-circuit a final decision.
@@ -65,12 +66,14 @@ does not short-circuit a final decision.
 
 - All hiring locations resolve to known jurisdictions.
 - The latest posting version has one assessment for every applicable policy.
-- Every assessment is `no_violation`.
+- Every assessment is `no_violation`, or a human reviewer explicitly resolves the finding.
 - An agent-authored revision has recruiter approval.
 - Evidence validation and all required tool calls completed successfully.
 
-Missing or failed work cannot produce a compliant result. It produces a retry, a focused
-question, a human-review request, or a failed session.
+An approving human review records the exact finding IDs that it resolves. Publication
+runs the same gate again, so a status change cannot bypass policy coverage. Missing or
+failed work produces a retry, a focused question, a human-review request, or a failed
+session.
 
 ## Security and privacy
 

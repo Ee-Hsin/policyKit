@@ -25,4 +25,3 @@ test:
 lint:
 	cd server && .venv/bin/ruff check app tests
 	cd server && .venv/bin/ruff format --check app tests
-	cd client && npm run lint

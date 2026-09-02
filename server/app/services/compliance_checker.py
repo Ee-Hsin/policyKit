@@ -5,7 +5,10 @@ import json
 from dataclasses import dataclass
 from time import monotonic
 
+from pydantic import ValidationError
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.openai_gateway import AIGateway
@@ -77,6 +80,22 @@ def validate_model_output(
             )
 
 
+def normalize_evidence_offsets(posting: str, output: ComplianceCheckOutput) -> None:
+    for assessment in output.assessments:
+        evidence = assessment.evidence_text
+        if evidence is None:
+            continue
+        start = assessment.evidence_start
+        end = assessment.evidence_end
+        if start is not None and end is not None and posting[start:end] == evidence:
+            continue
+        first_match = posting.find(evidence)
+        if first_match < 0 or posting.find(evidence, first_match + 1) >= 0:
+            continue
+        assessment.evidence_start = first_match
+        assessment.evidence_end = first_match + len(evidence)
+
+
 async def run_compliance_check(
     db: AsyncSession, session: ComplianceSession, ai: AIGateway
 ) -> ComplianceCheckResult:
@@ -105,32 +124,54 @@ async def run_compliance_check(
     )
     started = monotonic()
     if cached:
-        output = ComplianceCheckOutput.model_validate(cached.result)
-        response_id = "exact-cache"
-        input_tokens = 0
-        output_tokens = 0
-    else:
+        try:
+            output = ComplianceCheckOutput.model_validate(cached.result)
+            normalize_evidence_offsets(session.current_posting_version.content, output)
+            validate_model_output(session.current_posting_version.content, policies, output)
+        except (ValidationError, InvalidComplianceOutputError):
+            await db.delete(cached)
+            await db.flush()
+            cached = None
+    if not cached:
         model_result = await ai.check_compliance(
             posting=session.current_posting_version.content,
             policies=[policy_payload(policy) for policy in policies],
         )
         output = model_result.output
+        normalize_evidence_offsets(session.current_posting_version.content, output)
         response_id = model_result.response_id
         input_tokens = model_result.input_tokens
         output_tokens = model_result.output_tokens
+    else:
+        response_id = "exact-cache"
+        input_tokens = 0
+        output_tokens = 0
     duration_ms = round((monotonic() - started) * 1_000)
     if output.input_type != "job_posting":
         raise InvalidComplianceOutputError("The submitted content is not a job posting")
     validate_model_output(session.current_posting_version.content, policies, output)
     if not cached:
-        db.add(
-            ComplianceCacheEntry(
-                cache_key=cache_key,
-                policy_snapshot_id=session.policy_snapshot_id,
-                model_namespace=ai.checker_cache_namespace,
-                result=output.model_dump(mode="json"),
+        cache_values = {
+            "cache_key": cache_key,
+            "policy_snapshot_id": session.policy_snapshot_id,
+            "model_namespace": ai.checker_cache_namespace,
+            "result": output.model_dump(mode="json"),
+        }
+        dialect_name = db.bind.dialect.name if db.bind else ""
+        if dialect_name == "postgresql":
+            await db.execute(
+                postgresql_insert(ComplianceCacheEntry)
+                .values(**cache_values)
+                .on_conflict_do_nothing(index_elements=["cache_key"])
             )
-        )
+        elif dialect_name == "sqlite":
+            await db.execute(
+                sqlite_insert(ComplianceCacheEntry)
+                .values(**cache_values)
+                .on_conflict_do_nothing(index_elements=["cache_key"])
+            )
+        else:
+            db.add(ComplianceCacheEntry(**cache_values))
     findings = await session_repository.replace_findings(db, session, output.assessments)
     await session_repository.add_step(
         db,

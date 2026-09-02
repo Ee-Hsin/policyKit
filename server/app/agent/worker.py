@@ -30,7 +30,11 @@ class AgentWorker:
             if recovered:
                 logger.info("Recovered %s interrupted compliance sessions", recovered)
         while not self._stop.is_set():
-            worked = await self.run_once()
+            try:
+                worked = await self.run_once()
+            except Exception:
+                logger.exception("Agent worker iteration failed")
+                worked = False
             if not worked:
                 try:
                     await asyncio.wait_for(
@@ -50,6 +54,7 @@ class AgentWorker:
                 await agent.run(db, session.id)
             except Exception as error:
                 logger.exception("Compliance agent failed for session %s", session.id)
+                await db.rollback()
                 session = await session_repository.get_session(db, session.id)
                 session.status = ComplianceSessionStatus.FAILED.value
                 session.error_message = str(error)

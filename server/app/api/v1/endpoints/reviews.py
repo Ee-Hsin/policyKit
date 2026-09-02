@@ -62,14 +62,17 @@ async def resolve_review(
             raise HTTPException(status_code=422, detail="Finding does not contain evidence")
         precedent = (finding, finding.evidence_text)
 
-    review = await repository.add_human_review(
-        db,
-        session,
-        reviewer_name=request.reviewer_name,
-        decision=request.decision,
-        notes=request.notes,
-        precedent=precedent,
-    )
+    try:
+        review = await repository.add_human_review(
+            db,
+            session,
+            reviewer_name=request.reviewer_name,
+            decision=request.decision,
+            notes=request.notes,
+            precedent=precedent,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     if request.promote_to_precedent:
         from app.models.entities import ReviewedPrecedent
 

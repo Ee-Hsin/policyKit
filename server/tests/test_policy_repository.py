@@ -94,3 +94,15 @@ async def test_new_snapshot_includes_every_currently_published_policy(
         "NY_PAY_001",
         "GLOBAL_AGE_001",
     }
+
+
+async def test_publish_rejects_future_activation_without_a_scheduler(
+    db: AsyncSession,
+) -> None:
+    policy = await repository.create_policy(
+        db,
+        policy_create().model_copy(update={"effective_at": datetime(2100, 1, 1, tzinfo=UTC)}),
+    )
+
+    with pytest.raises(repository.PolicyStateError, match="Scheduled activation"):
+        await repository.publish_policy_version(db, policy.id, policy.versions[0].id)

@@ -4,8 +4,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.runtime import AgentToolError, AgentToolExecutor, ComplianceAgent
 from app.core.config import Settings
+from app.integrations.chroma import SemanticMatch
 from app.models.entities import (
     AgentStep,
+    ComplianceCacheEntry,
     ComplianceSessionStatus,
     FindingStatus,
     Policy,
@@ -133,6 +135,21 @@ async def test_identical_compliance_check_uses_the_exact_cache(db: AsyncSession)
     assert steps[-1].output_tokens == 0
 
 
+async def test_invalid_exact_cache_entry_is_recomputed(db: AsyncSession) -> None:
+    snapshot = await policy_snapshot(db)
+    session = await compliance_session(db, snapshot)
+    ai = FakeAI(output_factory=output_factory({}))
+    await run_compliance_check(db, session, ai)
+    cached = await db.scalar(select(ComplianceCacheEntry))
+    assert cached is not None
+    cached.result = {"invalid": "cached payload"}
+    await db.commit()
+
+    await run_compliance_check(db, session, ai)
+
+    assert len(ai.compliance_calls) == 2
+
+
 async def test_completion_rejects_missing_or_unresolved_policy_assessments(
     db: AsyncSession,
 ) -> None:
@@ -182,6 +199,192 @@ async def test_completion_rejects_an_unapproved_agent_revision(db: AsyncSession)
     }
 
 
+async def test_completion_rejects_findings_from_a_previous_location_scope(
+    db: AsyncSession,
+) -> None:
+    snapshot = PolicySnapshot(version=1, items=[])
+    db.add(snapshot)
+    for key, jurisdiction in (("NY_POLICY", "US-NY"), ("CA_POLICY", "US-CA")):
+        policy = Policy(key=key)
+        version = PolicyVersion(
+            version=1,
+            title=key,
+            category="content",
+            status=PolicyStatus.PUBLISHED.value,
+            rule_text=f"Rule for {jurisdiction} with enough detail.",
+            jurisdictions=[jurisdiction],
+            violation_examples=["Violation"],
+            compliant_examples=["Compliant"],
+        )
+        policy.versions.append(version)
+        db.add(policy)
+        await db.flush()
+        snapshot.items.append(PolicySnapshotItem(policy_version_id=version.id))
+    await db.commit()
+    session = await compliance_session(db, snapshot)
+    ai = FakeAI(output_factory=output_factory({}))
+    await run_compliance_check(db, session, ai)
+    executor = AgentToolExecutor(db, session, ai, FakeIndex())
+
+    await executor.execute("set_hiring_locations", {"locations": ["California"]})
+    result = await executor.execute("complete_session", {"summary": "Ready to publish"})
+
+    assert result == {
+        "error": "The current draft has not completed full policy coverage",
+        "retryable": True,
+    }
+
+
+async def test_revision_rejects_undeclared_changes(db: AsyncSession) -> None:
+    snapshot = await policy_snapshot(db, count=1)
+    session = await compliance_session(db, snapshot)
+    policy_id = snapshot.items[0].policy_version_id
+    ai = FakeAI(
+        output_factory=output_factory({policy_id: FindingStatus.VIOLATION}),
+        cache_namespace="fake-revision-checker",
+    )
+    await run_compliance_check(db, session, ai)
+    executor = AgentToolExecutor(db, session, ai, FakeIndex())
+
+    result = await executor.execute(
+        "propose_revision",
+        {
+            "revised_text": (
+                "Build and operate reliable Go services for our learning platform. Extra change."
+            ),
+            "changes": [
+                {
+                    "original_text": "Python",
+                    "replacement_text": "Go",
+                    "reason": "Resolve the supported policy finding.",
+                    "policy_keys": ["POLICY_001"],
+                }
+            ],
+        },
+    )
+
+    assert result == {
+        "error": "The revised posting contains changes that were not declared",
+        "retryable": True,
+    }
+
+
+async def test_revision_accepts_a_declared_sentence_deletion_without_double_spacing(
+    db: AsyncSession,
+) -> None:
+    snapshot = await policy_snapshot(db, count=1)
+    session = await compliance_session(db, snapshot)
+    session.current_posting_version.content = (
+        "Build reliable Python services. Recent graduates preferred. Mentor teammates."
+    )
+    await db.commit()
+    policy_id = snapshot.items[0].policy_version_id
+    ai = FakeAI(
+        output_factory=output_factory({policy_id: FindingStatus.VIOLATION}),
+        cache_namespace="fake-deletion-checker",
+    )
+    await run_compliance_check(db, session, ai)
+    executor = AgentToolExecutor(db, session, ai, FakeIndex())
+
+    result = await executor.execute(
+        "propose_revision",
+        {
+            "revised_text": "Build reliable Python services. Mentor teammates.",
+            "changes": [
+                {
+                    "original_text": "Recent graduates preferred.",
+                    "replacement_text": "",
+                    "reason": "Remove the supported age preference finding.",
+                    "policy_keys": ["POLICY_001"],
+                }
+            ],
+        },
+    )
+
+    assert result["status"] == ComplianceSessionStatus.WAITING_FOR_APPROVAL.value
+
+
+async def test_human_approval_records_and_resolves_reviewed_findings(
+    db: AsyncSession,
+) -> None:
+    snapshot = await policy_snapshot(db, count=1)
+    session = await compliance_session(db, snapshot)
+    policy_id = snapshot.items[0].policy_version_id
+    ai = FakeAI(
+        output_factory=output_factory({policy_id: FindingStatus.VIOLATION}),
+        cache_namespace="fake-human-review-checker",
+    )
+    await run_compliance_check(db, session, ai)
+    session.status = ComplianceSessionStatus.NEEDS_REVIEW.value
+    await db.commit()
+
+    review = await session_repository.add_human_review(
+        db,
+        session,
+        reviewer_name="Policy reviewer",
+        decision="approve",
+        notes="Approved as an explicit policy exception.",
+    )
+
+    stored = await session_repository.get_session(db, session.id)
+    findings = await session_repository.findings_for_session(
+        db,
+        session.id,
+        posting_version_id=session.current_posting_version_id,
+    )
+    assert stored.status == ComplianceSessionStatus.READY_TO_PUBLISH.value
+    assert review.finding_ids == [findings[0].id]
+    assert findings[0].resolved is True
+
+
+async def test_policy_search_uses_pinned_canonical_policy_text(
+    db: AsyncSession,
+) -> None:
+    snapshot = await policy_snapshot(db, count=1)
+    session = await compliance_session(db, snapshot)
+    pinned_version = snapshot.items[0].policy_version
+    index = FakeIndex(
+        matches=[
+            SemanticMatch(
+                record_id="newer-result",
+                text="A newer policy outside the snapshot.",
+                distance=0.01,
+                metadata={"policy_version_id": "not-in-the-snapshot"},
+            ),
+            SemanticMatch(
+                record_id=pinned_version.id,
+                text="Stale vector-store text that must not be trusted.",
+                distance=0.02,
+                metadata={"policy_version_id": pinned_version.id},
+            ),
+        ]
+    )
+    executor = AgentToolExecutor(db, session, FakeAI(), index)
+
+    result = await executor.execute(
+        "search_policies",
+        {"query": "policy rule", "category": "Content", "jurisdiction": None},
+    )
+
+    assert result["matches"] == [
+        {
+            "policy_key": "POLICY_001",
+            "title": "Policy 1",
+            "category": "content",
+            "passage": pinned_version.rule_text,
+            "distance": 0.02,
+        }
+    ]
+    assert index.search_calls == [
+        {
+            "collection_name": "policy_chunks",
+            "query": "policy rule",
+            "limit": 15,
+            "where": {"category": "content"},
+        }
+    ]
+
+
 async def test_agent_rejects_a_turn_without_a_tool_call(db: AsyncSession) -> None:
     snapshot = await policy_snapshot(db)
     session = await compliance_session(db, snapshot)
@@ -206,6 +409,8 @@ async def test_agent_rejects_a_turn_without_a_tool_call(db: AsyncSession) -> Non
     )
     assert steps[-1].kind == "agent_model"
     assert steps[-1].output_data["tools"] == []
+    supplied_tool_names = {tool["name"] for tool in ai.agent_calls[0]["tools"]}
+    assert supplied_tool_names == {"run_compliance_check"}
 
 
 async def test_agent_escalates_when_it_reaches_the_iteration_limit(

@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     openai_checker_model: str = "gpt-5.4-mini"
     openai_embedding_model: str = "text-embedding-3-small"
     openai_store_responses: bool = False
+    openai_timeout_seconds: float = 60
+    openai_agent_max_output_tokens: int = 1_200
+    openai_checker_max_output_tokens: int = 6_000
 
     chroma_mode: Literal["persistent", "http", "disabled"] = "persistent"
     chroma_persist_directory: Path = REPOSITORY_DIRECTORY / ".data" / "chroma"

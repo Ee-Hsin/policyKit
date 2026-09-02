@@ -314,11 +314,18 @@ async def add_human_review(
     notes: str | None,
     precedent: tuple[ComplianceFinding, str] | None = None,
 ) -> HumanReview:
+    findings = await findings_for_session(
+        db,
+        session.id,
+        posting_version_id=session.current_posting_version_id,
+    )
+    reviewed_finding_ids = [finding.id for finding in findings if finding.status != "no_violation"]
     review = HumanReview(
         session_id=session.id,
         reviewer_name=reviewer_name,
         decision=decision,
         notes=notes,
+        finding_ids=reviewed_finding_ids,
     )
     db.add(review)
     await db.flush()
@@ -336,6 +343,11 @@ async def add_human_review(
             )
         )
     if decision == "approve":
+        for finding in findings:
+            if finding.id in reviewed_finding_ids:
+                finding.resolved = True
+        await db.flush()
+        await validate_publishable(db, session)
         session.status = ComplianceSessionStatus.READY_TO_PUBLISH.value
         session.completed_at = utc_now()
     elif decision == "request_changes":
@@ -348,11 +360,51 @@ async def add_human_review(
     return review
 
 
+async def validate_publishable(db: AsyncSession, session: ComplianceSession) -> None:
+    from app.repositories import policies as policy_repository
+
+    if session.current_posting_version.source == "agent":
+        if session.current_posting_version.approved_at is None:
+            raise ValueError("The current agent revision has not been approved")
+    if not session.policy_snapshot_id:
+        raise ValueError("The session has no policy snapshot")
+    jurisdictions, unresolved_locations = resolve_jurisdictions(session.posting.target_locations)
+    if not jurisdictions or unresolved_locations:
+        raise ValueError("Hiring location scope is incomplete")
+    policies = await policy_repository.applicable_policy_versions(
+        db,
+        session.policy_snapshot_id,
+        jurisdictions=jurisdictions,
+        employment_type=session.posting.employment_type,
+        platform=session.posting.platform,
+    )
+    if not policies:
+        raise ValueError("No applicable policies were found")
+    findings = await findings_for_session(
+        db,
+        session.id,
+        posting_version_id=session.current_posting_version_id,
+    )
+    checked_policy_ids = [finding.policy_version_id for finding in findings]
+    applicable_policy_ids = {policy.id for policy in policies}
+    if (
+        len(checked_policy_ids) != len(applicable_policy_ids)
+        or set(checked_policy_ids) != applicable_policy_ids
+    ):
+        raise ValueError("The current draft has not completed full policy coverage")
+    unresolved_findings = [
+        finding for finding in findings if finding.status != "no_violation" and not finding.resolved
+    ]
+    if unresolved_findings:
+        raise ValueError("The current draft still has unresolved findings")
+
+
 async def publish_posting(
     db: AsyncSession, session: ComplianceSession, publisher_name: str
 ) -> None:
     if session.status != ComplianceSessionStatus.READY_TO_PUBLISH.value:
         raise ValueError("Only a ready posting can be published")
+    await validate_publishable(db, session)
     await add_step(
         db,
         session.id,

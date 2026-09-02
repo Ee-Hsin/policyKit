@@ -7,7 +7,6 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.agent.prompts import AGENT_INSTRUCTIONS
 from app.agent.tools import AGENT_TOOLS
@@ -19,7 +18,6 @@ from app.models.entities import (
     ComplianceSession,
     ComplianceSessionStatus,
     FindingStatus,
-    PolicyStatus,
     PolicyVersion,
     ReviewedPrecedent,
     StepStatus,
@@ -66,6 +64,23 @@ async def build_agent_state(db: AsyncSession, session: ComplianceSession) -> dic
     )
     changes = await session_repository.proposed_changes_for_session(db, session.id)
     jurisdictions, unresolved = resolve_jurisdictions(session.posting.target_locations)
+    applicable_policy_ids: set[str] = set()
+    if session.policy_snapshot_id and jurisdictions and not unresolved:
+        applicable_policy_ids = {
+            policy.id
+            for policy in await policy_repository.applicable_policy_versions(
+                db,
+                session.policy_snapshot_id,
+                jurisdictions=jurisdictions,
+                employment_type=session.posting.employment_type,
+                platform=session.posting.platform,
+            )
+        }
+    checked_policy_ids = [finding.policy_version_id for finding in findings]
+    check_is_current = bool(applicable_policy_ids) and (
+        len(checked_policy_ids) == len(applicable_policy_ids)
+        and set(checked_policy_ids) == applicable_policy_ids
+    )
     recent_steps = session.steps[-16:]
     return {
         "goal": session.goal,
@@ -100,6 +115,10 @@ async def build_agent_state(db: AsyncSession, session: ComplianceSession) -> dic
             }
             for finding in findings
         ],
+        "compliance_check": {
+            "current": check_is_current,
+            "applicable_policy_count": len(applicable_policy_ids),
+        },
         "proposed_changes": [
             {
                 "original_text": change.original_text,
@@ -128,6 +147,32 @@ async def build_agent_state(db: AsyncSession, session: ComplianceSession) -> dic
             "agent_revision_approved_by_recruiter": True,
         },
     }
+
+
+def available_agent_tools(state: dict[str, Any]) -> list[dict[str, Any]]:
+    posting = state["posting"]
+    scope_ready = bool(posting["resolved_jurisdictions"]) and not posting["unresolved_locations"]
+    if not scope_ready:
+        allowed = {"set_hiring_locations", "ask_recruiter", "escalate_to_reviewer"}
+    elif state["compliance_check"]["applicable_policy_count"] == 0:
+        allowed = {"escalate_to_reviewer"}
+    elif not state["compliance_check"]["current"]:
+        allowed = {"run_compliance_check"}
+    elif any(
+        finding["status"] != FindingStatus.NO_VIOLATION.value
+        for finding in state["current_findings"]
+    ):
+        allowed = {
+            "search_policies",
+            "read_policy",
+            "search_reviewed_precedents",
+            "propose_revision",
+            "ask_recruiter",
+            "escalate_to_reviewer",
+        }
+    else:
+        allowed = {"complete_session"}
+    return [tool for tool in AGENT_TOOLS if tool["name"] in allowed]
 
 
 class AgentToolExecutor:
@@ -179,14 +224,6 @@ class AgentToolExecutor:
             await self.db.commit()
         return result
 
-    async def _tool_resolve_scope(self, _: dict[str, Any]) -> dict[str, Any]:
-        resolved, unresolved = resolve_jurisdictions(self.session.posting.target_locations)
-        return {
-            "resolved_jurisdictions": resolved,
-            "unresolved_locations": unresolved,
-            "needs_recruiter_input": not resolved or bool(unresolved),
-        }
-
     async def _tool_set_hiring_locations(self, arguments: dict[str, Any]) -> dict[str, Any]:
         locations = [item.strip() for item in arguments["locations"] if item.strip()]
         if not locations:
@@ -219,18 +256,17 @@ class AgentToolExecutor:
     async def _tool_search_policies(self, arguments: dict[str, Any]) -> dict[str, Any]:
         where = None
         if arguments.get("category"):
-            where = {"category": arguments["category"]}
-        matches = await self.index.search("policy_chunks", arguments["query"], limit=5, where=where)
+            where = {"category": arguments["category"].lower()}
+        matches = await self.index.search(
+            "policy_chunks", arguments["query"], limit=15, where=where
+        )
+        if not self.session.policy_snapshot_id:
+            raise AgentToolError("The session has no policy snapshot")
+        snapshot = await policy_repository.get_snapshot(self.db, self.session.policy_snapshot_id)
+        pinned_versions = {item.policy_version_id: item.policy_version for item in snapshot.items}
         valid: list[dict[str, Any]] = []
         for match in matches:
-            version = await self.db.scalar(
-                select(PolicyVersion)
-                .where(
-                    PolicyVersion.id == match.metadata.get("policy_version_id"),
-                    PolicyVersion.status == PolicyStatus.PUBLISHED.value,
-                )
-                .options(selectinload(PolicyVersion.policy))
-            )
+            version = pinned_versions.get(match.metadata.get("policy_version_id"))
             if not version:
                 continue
             if arguments.get("jurisdiction"):
@@ -243,27 +279,34 @@ class AgentToolExecutor:
                     "policy_key": version.policy.key,
                     "title": version.title,
                     "category": version.category,
-                    "passage": match.text,
+                    "passage": version.rule_text,
                     "distance": match.distance,
                 }
             )
         return {"matches": valid, "source": "chroma"}
 
     async def _tool_read_policy(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        policy = await policy_repository.get_policy_by_key(self.db, arguments["policy_key"])
-        published = [
-            version for version in policy.versions if version.status == PolicyStatus.PUBLISHED.value
-        ]
-        if not published:
-            raise AgentToolError("Policy does not have a published version")
-        return _version_payload(max(published, key=lambda item: item.version))
+        if not self.session.policy_snapshot_id:
+            raise AgentToolError("The session has no policy snapshot")
+        snapshot = await policy_repository.get_snapshot(self.db, self.session.policy_snapshot_id)
+        version = next(
+            (
+                item.policy_version
+                for item in snapshot.items
+                if item.policy_version.policy.key == arguments["policy_key"]
+            ),
+            None,
+        )
+        if not version:
+            raise AgentToolError("Policy is not present in this session's snapshot")
+        return _version_payload(version)
 
     async def _tool_search_reviewed_precedents(self, arguments: dict[str, Any]) -> dict[str, Any]:
         where = None
         if arguments.get("category"):
-            where = {"category": arguments["category"]}
+            where = {"category": arguments["category"].lower()}
         matches = await self.index.search(
-            "reviewed_precedents", arguments["query"], limit=5, where=where
+            "reviewed_precedents", arguments["query"], limit=15, where=where
         )
         ids = [match.record_id for match in matches]
         precedents = {
@@ -277,9 +320,10 @@ class AgentToolExecutor:
             precedent = precedents.get(match.record_id)
             if not precedent:
                 continue
-            if arguments.get("jurisdiction") and precedent.jurisdiction not in {
+            requested_jurisdiction = (arguments.get("jurisdiction") or "").upper()
+            if requested_jurisdiction and precedent.jurisdiction.upper() not in {
                 "GLOBAL",
-                arguments["jurisdiction"],
+                requested_jurisdiction,
             }:
                 continue
             results.append(
@@ -310,13 +354,42 @@ class AgentToolExecutor:
         }
         if not actionable_policy_keys:
             raise AgentToolError("Run a check with actionable findings before proposing edits")
+        replacements: list[tuple[int, int, str]] = []
         for change in revision.changes:
-            if change.original_text not in current_text:
+            if change.original_text == change.replacement_text:
+                raise AgentToolError("A proposed edit does not change its source text")
+            if current_text.count(change.original_text) != 1:
                 raise AgentToolError(
-                    f"Original text is not present in the current posting: {change.original_text}"
+                    "Each original text must occur exactly once in the current posting: "
+                    f"{change.original_text}"
                 )
             if not set(change.policy_keys) <= actionable_policy_keys:
                 raise AgentToolError("A proposed edit references a policy without a finding")
+            start = current_text.index(change.original_text)
+            end = start + len(change.original_text)
+            if (
+                not change.replacement_text
+                and start > 0
+                and end < len(current_text)
+                and current_text[start - 1] == " "
+                and current_text[end] == " "
+            ):
+                end += 1
+            replacements.append((start, end, change.replacement_text))
+        replacements.sort()
+        if any(
+            current[0] < previous[1]
+            for previous, current in zip(replacements, replacements[1:], strict=False)
+        ):
+            raise AgentToolError("Proposed edits overlap")
+        revised_parts: list[str] = []
+        cursor = 0
+        for start, end, replacement in replacements:
+            revised_parts.extend((current_text[cursor:start], replacement))
+            cursor = end
+        revised_parts.append(current_text[cursor:])
+        if "".join(revised_parts) != revision.revised_text:
+            raise AgentToolError("The revised posting contains changes that were not declared")
         proposed = await session_repository.create_proposed_revision(
             self.db, self.session, revision
         )
@@ -342,33 +415,7 @@ class AgentToolExecutor:
         }
 
     async def _tool_complete_session(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        if self.session.current_posting_version.source == "agent":
-            if self.session.current_posting_version.approved_at is None:
-                raise AgentToolError("The current agent revision has not been approved")
-        findings = await session_repository.findings_for_session(
-            self.db,
-            self.session.id,
-            posting_version_id=self.session.current_posting_version_id,
-        )
-        if not self.session.policy_snapshot_id:
-            raise AgentToolError("The session has no policy snapshot")
-        resolved, unresolved = resolve_jurisdictions(self.session.posting.target_locations)
-        if not resolved or unresolved:
-            raise AgentToolError("Hiring location scope is incomplete")
-        policies = await policy_repository.applicable_policy_versions(
-            self.db,
-            self.session.policy_snapshot_id,
-            jurisdictions=resolved,
-            employment_type=self.session.posting.employment_type,
-            platform=self.session.posting.platform,
-        )
-        if len(findings) != len(policies):
-            raise AgentToolError("The current draft has not completed full policy coverage")
-        unresolved_findings = [
-            finding for finding in findings if finding.status != FindingStatus.NO_VIOLATION.value
-        ]
-        if unresolved_findings:
-            raise AgentToolError("The current draft still has unresolved findings")
+        await session_repository.validate_publishable(self.db, self.session)
         self.session.status = ComplianceSessionStatus.READY_TO_PUBLISH.value
         self.session.completed_at = utc_now()
         await self.db.flush()
@@ -395,7 +442,7 @@ class ComplianceAgent:
             turn = await self.ai.run_agent(
                 instructions=AGENT_INSTRUCTIONS,
                 state=state,
-                tools=AGENT_TOOLS,
+                tools=available_agent_tools(state),
             )
             duration_ms = round((monotonic() - started) * 1_000)
             session.agent_iterations += 1

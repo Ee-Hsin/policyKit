@@ -3,16 +3,6 @@
 AGENT_TOOLS = [
     {
         "type": "function",
-        "name": "resolve_scope",
-        "description": (
-            "Resolve the posting's hiring locations into policy jurisdictions. Use this before "
-            "the first compliance check and after hiring locations change."
-        ),
-        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-        "strict": True,
-    },
-    {
-        "type": "function",
         "name": "set_hiring_locations",
         "description": (
             "Save hiring locations supplied by the recruiter. Use only when a user message "

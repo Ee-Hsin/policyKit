@@ -295,6 +295,7 @@ class HumanReview(Base):
     reviewer_name: Mapped[str] = mapped_column(String(160))
     decision: Mapped[str] = mapped_column(String(40))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    finding_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 

@@ -1,5 +1,6 @@
 """ChromaDB indexes for policies and reviewed precedents."""
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
@@ -70,36 +71,53 @@ class ChromaIndex:
             if part and not part.endswith(": ")
         )
         embedding = (await self.ai.embed([text]))[0]
-        self._collection("policy_chunks").upsert(
-            ids=[version.id],
-            documents=[text],
-            embeddings=[embedding],
-            metadatas=[
-                {
-                    "policy_id": version.policy_id,
-                    "policy_key": version.policy.key,
-                    "policy_version_id": version.id,
-                    "version": version.version,
-                    "category": version.category,
-                    "jurisdictions": ",".join(version.jurisdictions or []),
-                }
-            ],
+        metadata = {
+            "policy_id": version.policy_id,
+            "policy_key": version.policy.key,
+            "policy_version_id": version.id,
+            "version": version.version,
+            "category": version.category.lower(),
+            "jurisdictions": ",".join(version.jurisdictions or []),
+        }
+        await asyncio.to_thread(
+            self._upsert,
+            "policy_chunks",
+            version.id,
+            text,
+            embedding,
+            metadata,
         )
 
     async def index_precedent(self, precedent: ReviewedPrecedent) -> None:
         embedding = (await self.ai.embed([precedent.excerpt]))[0]
-        self._collection("reviewed_precedents").upsert(
-            ids=[precedent.id],
-            documents=[precedent.excerpt],
+        metadata = {
+            "policy_version_id": precedent.policy_version_id,
+            "decision": precedent.decision,
+            "jurisdiction": precedent.jurisdiction.upper(),
+            "category": precedent.category.lower(),
+        }
+        await asyncio.to_thread(
+            self._upsert,
+            "reviewed_precedents",
+            precedent.id,
+            precedent.excerpt,
+            embedding,
+            metadata,
+        )
+
+    def _upsert(
+        self,
+        collection_name: str,
+        record_id: str,
+        text: str,
+        embedding: list[float],
+        metadata: dict[str, Any],
+    ) -> None:
+        self._collection(collection_name).upsert(
+            ids=[record_id],
+            documents=[text],
             embeddings=[embedding],
-            metadatas=[
-                {
-                    "policy_version_id": precedent.policy_version_id,
-                    "decision": precedent.decision,
-                    "jurisdiction": precedent.jurisdiction,
-                    "category": precedent.category,
-                }
-            ],
+            metadatas=[metadata],
         )
 
     async def search(
@@ -111,11 +129,12 @@ class ChromaIndex:
         where: dict[str, Any] | None = None,
     ) -> list[SemanticMatch]:
         embedding = (await self.ai.embed([query]))[0]
-        result = self._collection(collection_name).query(
-            query_embeddings=[embedding],
-            n_results=limit,
-            where=where,
-            include=["documents", "metadatas", "distances"],
+        result = await asyncio.to_thread(
+            self._query,
+            collection_name,
+            embedding,
+            limit,
+            where,
         )
         ids = result.get("ids", [[]])[0]
         documents = result.get("documents", [[]])[0]
@@ -130,3 +149,17 @@ class ChromaIndex:
             )
             for index, record_id in enumerate(ids)
         ]
+
+    def _query(
+        self,
+        collection_name: str,
+        embedding: list[float],
+        limit: int,
+        where: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        return self._collection(collection_name).query(
+            query_embeddings=[embedding],
+            n_results=limit,
+            where=where,
+            include=["documents", "metadatas", "distances"],
+        )
