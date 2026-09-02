@@ -48,7 +48,6 @@
 html {
   background: var(--paper);
   font-family: "Satoshi", "Helvetica Neue", Arial, sans-serif;
-  overflow-x: hidden;
   scroll-behavior: smooth;
 }
 
@@ -57,7 +56,6 @@ body {
     radial-gradient(circle at 7% 4%, rgba(185, 244, 217, 0.26), transparent 31rem),
     radial-gradient(circle at 92% 36%, rgba(215, 255, 98, 0.12), transparent 26rem),
     var(--paper);
-  overflow-x: hidden;
 }
 
 .app-main,
@@ -1464,6 +1462,12 @@ body {
   }
 }
 
+@media (min-width: 621px) and (max-width: 820px) {
+  .workflow-bento .bento-card:last-child {
+    grid-column: span 2;
+  }
+}
+
 @media (max-width: 620px) {
   .site-header {
     padding: 10px 10px 0;
@@ -1652,12 +1656,21 @@ body {
     width: 100%;
   }
 
-  .policy-table thead,
   .policy-table td:nth-child(2),
   .policy-table td:nth-child(3),
   .policy-table td:nth-child(4),
   .policy-table td:nth-child(5) {
     display: none;
+  }
+
+  .policy-table thead {
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    height: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
   }
 
   .policy-table tbody {

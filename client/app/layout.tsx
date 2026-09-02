@@ -28,10 +28,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               <Link href="/">Review a post</Link>
               <Link href="/admin/policies">Policy library</Link>
             </nav>
-            <Link className="header-action" href="/#review">
+            <a className="header-action" href="/#review">
               Start review
               <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M4 10h12m-5-5 5 5-5 5" /></svg>
-            </Link>
+            </a>
           </div>
         </header>
         <main className="app-main"><MotionProvider>{children}</MotionProvider></main>

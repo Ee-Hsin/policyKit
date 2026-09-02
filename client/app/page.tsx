@@ -88,7 +88,10 @@ export default function NewReviewPage() {
     setOrganization("Northstar Labs");
     setLocations("New York, California");
     setDescription(samplePosting);
-    document.querySelector("#review")?.scrollIntoView({ behavior: "smooth" });
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.querySelector("#review")?.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+    });
   }
 
   function movePrinciple(direction: -1 | 1) {
