@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { PanelIcon } from "@/components/PanelIcon";
 import type { PolicyCreateInput, PolicyDraftInput, PolicyVersionFields } from "@/lib/types";
 
 const emptyFields: PolicyVersionFields = {
@@ -100,7 +101,7 @@ export function PolicyForm({
     <form className="policy-form" onSubmit={submit}>
       <section className="admin-card">
         <div className="admin-card__heading">
-          <span>01</span>
+          <PanelIcon kind="identity" />
           <div>
             <p className="kicker">Identity</p>
             <h2>Name this policy</h2>
@@ -134,7 +135,7 @@ export function PolicyForm({
 
       <section className="admin-card">
         <div className="admin-card__heading">
-          <span>02</span>
+          <PanelIcon kind="rule" />
           <div>
             <p className="kicker">Decision standard</p>
             <h2>Define the rule</h2>
@@ -158,7 +159,7 @@ export function PolicyForm({
 
       <section className="admin-card">
         <div className="admin-card__heading">
-          <span>03</span>
+          <PanelIcon kind="scope" />
           <div>
             <p className="kicker">Scope</p>
             <h2>Set where it applies</h2>
@@ -201,7 +202,7 @@ export function PolicyForm({
 
       <section className="admin-card">
         <div className="admin-card__heading">
-          <span>04</span>
+          <PanelIcon kind="guidance" />
           <div>
             <p className="kicker">Guidance</p>
             <h2>Add examples and exceptions</h2>

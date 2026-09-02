@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { PanelIcon } from "@/components/PanelIcon";
 import { PolicyForm } from "@/components/PolicyForm";
 import {
   ApiError,
@@ -20,7 +21,7 @@ function ReadOnlyVersion({ version }: { version: PolicyVersion }) {
     <div className="policy-readonly">
       <section className="admin-card">
         <div className="admin-card__heading">
-          <span>01</span>
+          <PanelIcon kind="rule" />
           <div><p className="kicker">Decision standard</p><h2>Policy rule</h2></div>
         </div>
         <p className="rule-copy">{version.rule_text}</p>
@@ -31,7 +32,7 @@ function ReadOnlyVersion({ version }: { version: PolicyVersion }) {
       </section>
       <section className="admin-card">
         <div className="admin-card__heading">
-          <span>02</span>
+          <PanelIcon kind="scope" />
           <div><p className="kicker">Scope and guidance</p><h2>Application details</h2></div>
         </div>
         <div className="definition-grid definition-grid--three">
@@ -189,7 +190,7 @@ export default function PolicyDetailPage() {
 
       <section className="admin-card test-card">
         <div className="admin-card__heading">
-          <span>↗</span>
+          <PanelIcon kind="test" />
           <div><p className="kicker">Model check</p><h2>Test this policy version</h2></div>
         </div>
         <p>Try a sample job-posting excerpt before publication. Testing does not modify the policy.</p>
