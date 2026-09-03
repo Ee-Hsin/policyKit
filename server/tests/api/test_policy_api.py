@@ -2,7 +2,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints import policies as policy_endpoints
-from app.models.entities import ComplianceSessionStatus, FindingStatus
+from app.models.entities import ComplianceSessionStatus, FindingStatus, PostingVersion
 from app.repositories import policies as policy_repository
 from app.repositories import sessions as session_repository
 from app.schemas.ai import PolicyAssessment
@@ -38,6 +38,14 @@ class NoCostIndex:
 
     async def index_policy(self, _version) -> None:
         return None
+
+
+class FailingGateway:
+    def __init__(self, _settings) -> None:
+        pass
+
+    async def check_compliance(self, **_kwargs):
+        raise RuntimeError("provider unavailable")
 
 
 async def create_and_publish_policy(
@@ -155,6 +163,23 @@ async def test_policy_patch_rejects_null_for_required_fields(
     )
 
     assert response.status_code == 422
+
+
+async def test_policy_test_returns_a_controlled_provider_error(
+    api_client: httpx.AsyncClient,
+    monkeypatch,
+) -> None:
+    created = await api_client.post("/api/v1/policies", json=POLICY_REQUEST)
+    payload = created.json()
+    monkeypatch.setattr(policy_endpoints, "OpenAIGateway", FailingGateway)
+
+    response = await api_client.post(
+        f"/api/v1/policies/{payload['id']}/versions/{payload['versions'][0]['id']}/test",
+        json={"posting_text": "A sufficiently long example job posting for testing."},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Policy test could not complete"
 
 
 async def test_admin_can_publish_a_policy_and_session_is_pinned_to_its_snapshot(
@@ -291,3 +316,58 @@ async def test_reviewer_cannot_approve_an_unchecked_escalated_session(
     )
     assert reviewed.status_code == 409
     assert reviewed.json()["detail"] == ("The current draft has not completed full policy coverage")
+
+
+async def test_reviewer_cannot_promote_evidence_from_an_older_posting_version(
+    api_client: httpx.AsyncClient,
+    db: AsyncSession,
+    monkeypatch,
+) -> None:
+    await create_and_publish_policy(api_client, monkeypatch)
+    created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
+    session = await session_repository.get_session(db, created.json()["id"])
+    snapshot = await policy_repository.get_snapshot(db, session.policy_snapshot_id)
+    policy_version_id = snapshot.items[0].policy_version_id
+    await session_repository.replace_findings(
+        db,
+        session,
+        [
+            PolicyAssessment(
+                policy_id=policy_version_id,
+                status=FindingStatus.VIOLATION,
+                evidence_text="Python services",
+                evidence_start=15,
+                evidence_end=30,
+                reason="Test finding for the original posting.",
+            )
+        ],
+    )
+    old_findings = await session_repository.findings_for_session(
+        db,
+        session.id,
+        posting_version_id=session.current_posting_version_id,
+    )
+    new_version = PostingVersion(
+        posting_id=session.posting_id,
+        version=2,
+        content="Build reliable services for our learning platform and customers.",
+        source="user",
+    )
+    db.add(new_version)
+    await db.flush()
+    session.current_posting_version_id = new_version.id
+    session.status = ComplianceSessionStatus.NEEDS_REVIEW.value
+    await db.commit()
+
+    response = await api_client.post(
+        f"/api/v1/reviews/{session.id}",
+        json={
+            "reviewer_name": "Policy reviewer",
+            "decision": "reject",
+            "promote_to_precedent": True,
+            "finding_id": old_findings[0].id,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Finding is not part of the current posting version"

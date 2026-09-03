@@ -1,5 +1,7 @@
 """Versioned policy administration endpoints."""
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +28,7 @@ from app.services.compliance_checker import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def policy_detail(policy: Policy) -> PolicyDetail:
@@ -125,6 +128,9 @@ async def test_policy_version(
         validate_model_output(request.posting_text, [version], result.output)
     except MissingAIConfigurationError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
+    except Exception as error:
+        logger.exception("Policy test failed for version %s", version_id)
+        raise HTTPException(status_code=502, detail="Policy test could not complete") from error
     assessment = result.output.assessments[0]
     return PolicyTestResponse(
         policy_key=policy.key,

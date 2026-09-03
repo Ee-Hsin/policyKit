@@ -116,7 +116,7 @@ export function testPolicy(policyId: string, versionId: string, postingText: str
     confidence: number | null;
   }>(`/policies/${policyId}/versions/${versionId}/test`, {
     method: "POST",
-    body: JSON.stringify({ posting_text: postingText, jurisdictions: [] }),
+    body: JSON.stringify({ posting_text: postingText }),
   });
 }
 

@@ -53,12 +53,18 @@ async def resolve_review(
             .where(
                 ComplianceFinding.id == request.finding_id,
                 ComplianceFinding.session_id == session_id,
+                ComplianceFinding.posting_version_id == session.current_posting_version_id,
             )
             .options(
                 selectinload(ComplianceFinding.policy_version).selectinload(PolicyVersion.policy)
             )
         )
-        if not finding or not finding.evidence_text:
+        if not finding:
+            raise HTTPException(
+                status_code=422,
+                detail="Finding is not part of the current posting version",
+            )
+        if not finding.evidence_text:
             raise HTTPException(status_code=422, detail="Finding does not contain evidence")
         precedent = (finding, finding.evidence_text)
 

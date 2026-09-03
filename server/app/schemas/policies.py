@@ -136,8 +136,9 @@ class PolicyDetail(BaseModel):
 
 
 class PolicyTestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     posting_text: str = Field(min_length=20)
-    jurisdictions: list[str] = Field(default_factory=list)
 
 
 class PolicyTestResponse(BaseModel):
