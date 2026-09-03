@@ -42,4 +42,5 @@ htmlcov/
 *.log
 
 # Project specific
-todo.txt 
+todo.txt
+INFRASTRUCTURE_IMPROVEMENT_PLAN.md
