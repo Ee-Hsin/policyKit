@@ -1,37 +1,38 @@
-"""Database configuration and session management."""
+"""Async database engine and session helpers."""
 
-from typing import AsyncGenerator
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from collections.abc import AsyncIterator
 
-from app.core.config import settings
-
-# Create async engine
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.DB_ECHO_LOG,
-    future=True,
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
 )
+from sqlalchemy.orm import DeclarativeBase
 
-# Create async session factory
-async_session_factory = sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+from app.core.config import get_settings
+
 
 class Base(DeclarativeBase):
-    """Base class for all database models."""
     pass
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency for getting async database sessions."""
-    async with async_session_factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close() 
+
+settings = get_settings()
+engine: AsyncEngine = create_async_engine(
+    settings.database_url,
+    echo=settings.app_env == "development" and False,
+    pool_pre_ping=True,
+)
+SessionFactory = async_sessionmaker(engine, expire_on_commit=False)
+
+
+async def get_db() -> AsyncIterator[AsyncSession]:
+    async with SessionFactory() as session:
+        yield session
+
+
+async def create_schema() -> None:
+    from app.models import entities  # noqa: F401
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)

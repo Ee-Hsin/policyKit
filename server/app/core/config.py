@@ -1,92 +1,57 @@
-"""Application configuration settings."""
+"""Environment-backed application settings."""
 
-from typing import List, Dict, Any
-from pydantic_settings import BaseSettings
-from pydantic import AnyHttpUrl
+from functools import lru_cache
+from pathlib import Path
+from typing import Literal
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+SERVER_DIRECTORY = Path(__file__).resolve().parents[2]
+REPOSITORY_DIRECTORY = SERVER_DIRECTORY.parent
+
 
 class Settings(BaseSettings):
-    """Application settings."""
-    
-    # API Settings
-    API_V1_STR: str = "/api/v1"
-    PROJECT_NAME: str = "PolicyKit"
-    
-    # CORS Configuration
-    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
-    
-    # OpenAI Settings
-    OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "gpt-4o"
-    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
-    
-    # Database Settings
-    POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: str = "postgres"
-    POSTGRES_HOST: str = "localhost"
-    POSTGRES_PORT: str = "5432"
-    POSTGRES_DB: str = "policykit"
-    DB_ECHO_LOG: bool = False
-    
-    @property
-    def DATABASE_URL(self) -> str:
-        """Get the database URL."""
-        return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
-    
-    # Policy Checker Settings
-    JOB_POSTING_CONFIDENCE_THRESHOLD: float = 0.9
-    SECURITY_CHECK_CONFIDENCE_THRESHOLD: float = 0.9
-    POLICY_INVESTIGATION_CONFIDENCE_THRESHOLD: float = 0.7
-    FINAL_OUTPUT_CONFIDENCE_THRESHOLD: float = 0.85
-    MAX_PARALLEL_INVESTIGATIONS: int = 3
-    LLM_INVESTIGATION_TIMEOUT: int = 30
-    VECTOR_SIMILARITY_THRESHOLD: float = 0.98  # 98% similarity threshold for RAG
-    
-    # Injection Patterns
-    INJECTION_PATTERNS: List[Dict[str, Any]] = [
-        {
-            "pattern": "ignore previous instructions",
-            "description": "Attempt to override system instructions"
-        },
-        {
-            "pattern": "system prompt",
-            "description": "Attempt to access system prompt"
-        },
-        {
-            "pattern": "disregard all prior",
-            "description": "Attempt to override system behavior"
-        },
-        {
-            "pattern": "forget your previous",
-            "description": "Attempt to reset system state"
-        },
-        {
-            "pattern": "you are now",
-            "description": "Attempt to change system identity"
-        },
-        {
-            "pattern": "bypass security",
-            "description": "Attempt to circumvent security controls"
-        },
-        {
-            "pattern": "reveal your training",
-            "description": "Attempt to extract system information"
-        },
-        {
-            "pattern": "let's play a game",
-            "description": "Common social engineering pattern"
-        },
-        {
-            "pattern": "pretend to be",
-            "description": "Attempt to change system behavior"
-        },
-        {
-            "pattern": "do not check",
-            "description": "Attempt to bypass validation"
-        }
-    ]
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    model_config = SettingsConfigDict(
+        env_file=REPOSITORY_DIRECTORY / ".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
 
-settings = Settings() 
+    app_name: str = "PolicyKit"
+    app_env: Literal["development", "test", "production"] = "development"
+    app_secret_key: str = "change-me-in-production"
+    api_v1_prefix: str = "/api/v1"
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/policykit"
+
+    openai_api_key: str | None = None
+    openai_agent_model: str = "gpt-5.4-mini"
+    openai_checker_model: str = "gpt-5.4-mini"
+    openai_embedding_model: str = "text-embedding-3-small"
+    openai_store_responses: bool = False
+    openai_timeout_seconds: float = 60
+    openai_agent_max_output_tokens: int = 1_200
+    openai_checker_max_output_tokens: int = 6_000
+    openai_checker_reasoning_effort: Literal["low", "medium", "high"] = "medium"
+
+    chroma_mode: Literal["persistent", "http", "disabled"] = "persistent"
+    chroma_persist_directory: Path = REPOSITORY_DIRECTORY / ".data" / "chroma"
+    chroma_host: str = "localhost"
+    chroma_port: int = 8001
+    chroma_ssl: bool = False
+    chroma_api_key: str | None = None
+    chroma_tenant: str | None = None
+    chroma_database: str | None = None
+
+    run_agent_worker: bool = True
+    agent_poll_interval_seconds: float = 1.0
+    agent_max_steps: int = 12
+    agent_stale_after_seconds: int = 300
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
