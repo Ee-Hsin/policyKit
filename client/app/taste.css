@@ -58,6 +58,25 @@ body {
     var(--paper);
 }
 
+.skip-link {
+  background: var(--ink);
+  border-radius: 0 0 10px 0;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  left: 0;
+  padding: 11px 16px;
+  position: fixed;
+  top: 0;
+  transform: translateY(-120%);
+  transition: transform 160ms ease;
+  z-index: 100;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
 .app-main,
 .motion-root {
   max-width: 100%;
@@ -1198,6 +1217,30 @@ body {
   display: none;
 }
 
+.policy-mobile-list {
+  display: none;
+}
+
+.load-error-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-top: 22px;
+  padding: clamp(28px, 4vw, 48px);
+}
+
+.load-error-card h2 {
+  font-size: clamp(26px, 3vw, 38px);
+  margin-bottom: 12px;
+}
+
+.load-error-card > p:not(.kicker) {
+  color: var(--ink-soft);
+  margin-bottom: 24px;
+  max-width: 560px;
+}
+
 .row-arrow {
   align-items: center;
   background: var(--ink);
@@ -1649,6 +1692,61 @@ body {
 
   .policy-table-wrap {
     max-width: 100%;
+  }
+
+  .policy-table-wrap--desktop {
+    display: none;
+  }
+
+  .policy-mobile-list {
+    display: grid;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .policy-mobile-list li {
+    border-top: 1px solid var(--line);
+  }
+
+  .policy-mobile-list a {
+    display: grid;
+    gap: 7px;
+    padding: 18px 16px;
+  }
+
+  .policy-mobile-list__heading {
+    align-items: center;
+    display: flex;
+    gap: 18px;
+    justify-content: space-between;
+  }
+
+  .policy-mobile-list__heading strong {
+    font-size: 15px;
+  }
+
+  .policy-mobile-list__key {
+    color: var(--ink-soft);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px;
+    letter-spacing: 0.03em;
+  }
+
+  .policy-mobile-list__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+  }
+
+  .policy-mobile-list__meta > span {
+    background: #eef1ea;
+    border-radius: 999px;
+    color: var(--ink-soft);
+    font-size: 9px;
+    font-weight: 700;
+    padding: 5px 7px;
   }
 
   .policy-table {

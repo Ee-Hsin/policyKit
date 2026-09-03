@@ -184,7 +184,7 @@ export default function NewReviewPage() {
 
         <div className="workflow-bento">
           <article className="bento-card bento-card--wide motion-reveal">
-            <div className="bento-card__number">12</div>
+            <div className="bento-card__number">All</div>
             <div>
               <h3>Every applicable policy, not a sample.</h3>
               <p>The checker receives the full scoped policy set from a fixed PostgreSQL snapshot.</p>

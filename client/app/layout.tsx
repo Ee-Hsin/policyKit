@@ -11,8 +11,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" data-scroll-behavior="smooth">
       <body>
+        <a className="skip-link" href="#main-content">Skip to main content</a>
         <header className="site-header">
           <div className="site-header__inner">
             <Link className="brand" href="/" aria-label="PolicyKit home">
@@ -34,7 +35,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             </a>
           </div>
         </header>
-        <main className="app-main"><MotionProvider>{children}</MotionProvider></main>
+        <main className="app-main" id="main-content"><MotionProvider>{children}</MotionProvider></main>
       </body>
     </html>
   );
