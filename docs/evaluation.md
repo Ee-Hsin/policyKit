@@ -21,6 +21,9 @@ The seeded eval set includes compliant controls, clear violations, subtle langua
 multiple violations, negation, missing compensation details, and prompt-injection text
 embedded inside a job posting.
 
+There are 13 authored cases. Each case fixes the expected status for every applicable
+policy, so a run can measure both missed violations and unsupported findings.
+
 Primary metrics are:
 
 - Violation recall and false-negative rate
@@ -42,3 +45,8 @@ cd server
 
 Start with a small limit. Review failures before running the complete suite. A model or
 prompt change should not ship when it increases the critical false-negative count.
+
+The September 3, 2026 full run passed 13 of 13 exact cases with 100% assessment accuracy,
+violation recall, and violation precision. This is a recorded verification result, not a
+guarantee of future model behavior. Repeat the live suite after changes to models, prompts,
+structured schemas, policy text, or policy scope logic.
