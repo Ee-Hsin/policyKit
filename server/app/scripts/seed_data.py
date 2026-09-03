@@ -446,7 +446,7 @@ async def seed_database() -> None:
         f"Seeded {len(published_versions)} published policies, "
         f"snapshot {snapshot.version}, and {eval_count} eval cases."
     )
-    print("Chroma indexing was not run; this command does not make OpenAI API calls.")
+    print("Chroma indexing was not run; use `python -m app.scripts.reindex` when ready.")
 
 
 if __name__ == "__main__":
