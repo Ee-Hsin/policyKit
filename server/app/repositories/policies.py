@@ -26,6 +26,23 @@ class PolicyStateError(ValueError):
     pass
 
 
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+async def _lock_policy_for_change(db: AsyncSession, policy_id: str) -> None:
+    statement = select(Policy.id).where(Policy.id == policy_id)
+    if db.bind and db.bind.dialect.name == "postgresql":
+        statement = statement.with_for_update()
+    if not await db.scalar(statement):
+        raise PolicyNotFoundError(policy_id)
+
+
+async def _lock_policy_publication(db: AsyncSession) -> None:
+    if db.bind and db.bind.dialect.name == "postgresql":
+        await db.execute(select(func.pg_advisory_xact_lock(9021001)))
+
+
 async def create_policy(db: AsyncSession, data: PolicyCreate) -> Policy:
     existing = await db.scalar(select(Policy).where(Policy.key == data.key))
     if existing:
@@ -41,7 +58,10 @@ async def create_policy(db: AsyncSession, data: PolicyCreate) -> Policy:
 
 async def get_policy(db: AsyncSession, policy_id: str) -> Policy:
     policy = await db.scalar(
-        select(Policy).where(Policy.id == policy_id).options(selectinload(Policy.versions))
+        select(Policy)
+        .where(Policy.id == policy_id)
+        .options(selectinload(Policy.versions))
+        .execution_options(populate_existing=True)
     )
     if not policy:
         raise PolicyNotFoundError(policy_id)
@@ -50,7 +70,10 @@ async def get_policy(db: AsyncSession, policy_id: str) -> Policy:
 
 async def get_policy_by_key(db: AsyncSession, key: str) -> Policy:
     policy = await db.scalar(
-        select(Policy).where(Policy.key == key).options(selectinload(Policy.versions))
+        select(Policy)
+        .where(Policy.key == key)
+        .options(selectinload(Policy.versions))
+        .execution_options(populate_existing=True)
     )
     if not policy:
         raise PolicyNotFoundError(key)
@@ -67,8 +90,15 @@ async def list_policies(db: AsyncSession) -> list[Policy]:
 async def update_draft(
     db: AsyncSession, policy_id: str, version_id: str, data: PolicyDraftUpdate
 ) -> Policy:
-    policy = await get_policy(db, policy_id)
-    version = next((item for item in policy.versions if item.id == version_id), None)
+    await _lock_policy_for_change(db, policy_id)
+    version = await db.scalar(
+        select(PolicyVersion)
+        .where(
+            PolicyVersion.id == version_id,
+            PolicyVersion.policy_id == policy_id,
+        )
+        .execution_options(populate_existing=True)
+    )
     if not version:
         raise PolicyNotFoundError(version_id)
     if version.status not in {PolicyStatus.DRAFT.value, PolicyStatus.TESTING.value}:
@@ -82,10 +112,17 @@ async def update_draft(
 
 
 async def create_draft_version(db: AsyncSession, policy_id: str) -> Policy:
-    policy = await get_policy(db, policy_id)
-    if any(version.status == PolicyStatus.DRAFT.value for version in policy.versions):
+    await _lock_policy_for_change(db, policy_id)
+    versions = list(
+        await db.scalars(
+            select(PolicyVersion)
+            .where(PolicyVersion.policy_id == policy_id)
+            .execution_options(populate_existing=True)
+        )
+    )
+    if any(version.status == PolicyStatus.DRAFT.value for version in versions):
         raise PolicyStateError("This policy already has a draft version")
-    latest = max(policy.versions, key=lambda item: item.version)
+    latest = max(versions, key=lambda item: item.version)
     fields = {
         "title": latest.title,
         "category": latest.category,
@@ -102,7 +139,7 @@ async def create_draft_version(db: AsyncSession, policy_id: str) -> Policy:
         "effective_at": latest.effective_at,
         "expires_at": latest.expires_at,
     }
-    policy.versions.append(PolicyVersion(version=latest.version + 1, **fields))
+    db.add(PolicyVersion(policy_id=policy_id, version=latest.version + 1, **fields))
     await db.commit()
     return await get_policy(db, policy_id)
 
@@ -110,28 +147,40 @@ async def create_draft_version(db: AsyncSession, policy_id: str) -> Policy:
 async def publish_policy_version(
     db: AsyncSession, policy_id: str, version_id: str
 ) -> tuple[Policy, PolicySnapshot]:
-    policy = await get_policy(db, policy_id)
-    version = next((item for item in policy.versions if item.id == version_id), None)
+    await _lock_policy_publication(db)
+    await _lock_policy_for_change(db, policy_id)
+    versions = list(
+        await db.scalars(
+            select(PolicyVersion)
+            .where(PolicyVersion.policy_id == policy_id)
+            .execution_options(populate_existing=True)
+        )
+    )
+    version = next((item for item in versions if item.id == version_id), None)
     if not version:
         raise PolicyNotFoundError(version_id)
     if version.status not in {PolicyStatus.DRAFT.value, PolicyStatus.TESTING.value}:
         raise PolicyStateError("Only a draft or testing policy can be published")
     if not version.violation_examples or not version.compliant_examples:
         raise PolicyStateError("Published policies require violation and compliant examples")
-    if version.expires_at and version.effective_at and version.expires_at <= version.effective_at:
-        raise PolicyStateError("Expiration must occur after the effective date")
-
     now = utc_now()
-    if version.effective_at and version.effective_at > now:
+    effective_at = _as_utc(version.effective_at) if version.effective_at else now
+    expires_at = _as_utc(version.expires_at) if version.expires_at else None
+    if effective_at > now:
         raise PolicyStateError(
             "Scheduled activation is not supported; effective time must be now or earlier"
         )
-    for other in policy.versions:
+    if expires_at and expires_at <= now:
+        raise PolicyStateError("Expired policy versions cannot be published")
+    if expires_at and expires_at <= effective_at:
+        raise PolicyStateError("Expiration must occur after the effective date")
+    for other in versions:
         if other.status == PolicyStatus.PUBLISHED.value:
             other.status = PolicyStatus.RETIRED.value
     version.status = PolicyStatus.PUBLISHED.value
     version.published_at = now
-    version.effective_at = version.effective_at or now
+    version.effective_at = effective_at
+    version.expires_at = expires_at
     version.index_status = IndexStatus.PENDING.value
 
     next_snapshot_version = (await db.scalar(select(func.max(PolicySnapshot.version))) or 0) + 1
@@ -141,7 +190,11 @@ async def publish_policy_version(
 
     active_versions = list(
         await db.scalars(
-            select(PolicyVersion).where(PolicyVersion.status == PolicyStatus.PUBLISHED.value)
+            select(PolicyVersion).where(
+                PolicyVersion.status == PolicyStatus.PUBLISHED.value,
+                (PolicyVersion.effective_at.is_(None) | (PolicyVersion.effective_at <= now)),
+                (PolicyVersion.expires_at.is_(None) | (PolicyVersion.expires_at > now)),
+            )
         )
     )
     if version not in active_versions:
@@ -186,21 +239,13 @@ def policy_applies(
     platform: str,
     at: datetime,
 ) -> bool:
-    check_time = at.replace(tzinfo=UTC) if at.tzinfo is None else at.astimezone(UTC)
+    check_time = _as_utc(at)
     effective_at = version.effective_at
     if effective_at is not None:
-        effective_at = (
-            effective_at.replace(tzinfo=UTC)
-            if effective_at.tzinfo is None
-            else effective_at.astimezone(UTC)
-        )
+        effective_at = _as_utc(effective_at)
     expires_at = version.expires_at
     if expires_at is not None:
-        expires_at = (
-            expires_at.replace(tzinfo=UTC)
-            if expires_at.tzinfo is None
-            else expires_at.astimezone(UTC)
-        )
+        expires_at = _as_utc(expires_at)
     policy_jurisdictions = {item.upper() for item in version.jurisdictions}
     requested_jurisdictions = {item.upper() for item in jurisdictions}
     jurisdiction_match = (

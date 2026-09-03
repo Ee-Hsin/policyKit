@@ -32,6 +32,7 @@ async def session_response(db: AsyncSession, session: ComplianceSession) -> Comp
         db, session.id, posting_version_id=session.current_posting_version_id
     )
     changes = await repository.proposed_changes_for_session(db, session.id)
+    steps = await repository.steps_for_session(db, session.id)
     return ComplianceSessionRead(
         id=session.id,
         status=session.status,
@@ -67,7 +68,7 @@ async def session_response(db: AsyncSession, session: ComplianceSession) -> Comp
             for finding in findings
         ],
         proposed_changes=[ProposedChangeRead.model_validate(change) for change in changes],
-        steps=[AgentStepRead.model_validate(step) for step in session.steps],
+        steps=[AgentStepRead.model_validate(step) for step in steps],
         created_at=session.created_at,
         updated_at=session.updated_at,
         completed_at=session.completed_at,

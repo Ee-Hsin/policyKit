@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     openai_timeout_seconds: float = 60
     openai_agent_max_output_tokens: int = 1_200
     openai_checker_max_output_tokens: int = 6_000
+    openai_checker_reasoning_effort: Literal["low", "medium", "high"] = "medium"
 
     chroma_mode: Literal["persistent", "http", "disabled"] = "persistent"
     chroma_persist_directory: Path = REPOSITORY_DIRECTORY / ".data" / "chroma"

@@ -52,7 +52,10 @@ class OpenAIGateway:
 
     @property
     def checker_cache_namespace(self) -> str:
-        return f"{self.settings.openai_checker_model}:full-policy-check-v5"
+        return (
+            f"{self.settings.openai_checker_model}:"
+            f"full-policy-check-v7-{self.settings.openai_checker_reasoning_effort}"
+        )
 
     async def run_agent(
         self, *, instructions: str, state: dict[str, Any], tools: list[dict[str, Any]]
@@ -104,6 +107,10 @@ that its wording does not put at issue. Assess each policy independently and app
 explicit rule. A violation of one policy is not evidence that another policy was violated.
 For an accuracy policy, violation evidence must itself contain a false, misleading, or
 unsupported claim. Illegal duties that are stated openly are not evidence of inaccuracy.
+Decide each status from the explicit policy rule and posting evidence before writing its
+reason. The status and reason must agree. If the reason says required content is present,
+compliant, allowed, or not a violation, return no_violation. Do not mark a requirement as
+violated when the posting contains the required information.
 """.strip()
         input_payload = {
             "posting": posting,
@@ -114,6 +121,7 @@ unsupported claim. Illegal duties that are stated openly are not evidence of ina
             instructions=instructions,
             input=json.dumps(input_payload, default=str),
             text_format=ComplianceCheckOutput,
+            reasoning={"effort": self.settings.openai_checker_reasoning_effort},
             max_output_tokens=self.settings.openai_checker_max_output_tokens,
             store=self.settings.openai_store_responses,
         )

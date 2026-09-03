@@ -24,6 +24,16 @@ AUTHORED_EVAL_CASES = (
         jurisdictions=("US", "US-NY"),
     ),
     AuthoredEvalCase(
+        name="named_employer_is_compliant",
+        posting_text=(
+            "Harbor Support is hiring a full-time Support Specialist. The annual salary range "
+            "is $60,000-$72,000 USD. You will answer customer questions, document issues, and "
+            "work with engineering. We welcome applicants from all backgrounds and provide "
+            "reasonable accommodations."
+        ),
+        jurisdictions=("US", "US-NY"),
+    ),
+    AuthoredEvalCase(
         name="age_preference_violation",
         posting_text=(
             "Acme Software is hiring a marketing coordinator in New York. Applicants must be "

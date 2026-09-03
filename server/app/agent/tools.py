@@ -82,13 +82,13 @@ AGENT_TOOLS = [
         "type": "function",
         "name": "propose_revision",
         "description": (
-            "Save one revised posting and its exact changes for recruiter approval. Preserve the "
-            "role's meaning and address only supported compliance findings."
+            "Save exact changes for recruiter approval. Preserve the role's meaning and address "
+            "only supported compliance findings. Python applies the listed changes to the current "
+            "posting and preserves all other text."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "revised_text": {"type": "string", "minLength": 30},
                 "changes": {
                     "type": "array",
                     "minItems": 1,
@@ -114,7 +114,7 @@ AGENT_TOOLS = [
                     },
                 },
             },
-            "required": ["revised_text", "changes"],
+            "required": ["changes"],
             "additionalProperties": False,
         },
         "strict": True,

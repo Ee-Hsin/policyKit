@@ -1,8 +1,10 @@
+from datetime import timedelta
+
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.runtime import AgentToolError, AgentToolExecutor, ComplianceAgent
+from app.agent.runtime import AgentToolError, AgentToolExecutor, ComplianceAgent, build_agent_state
 from app.core.config import Settings
 from app.integrations.chroma import SemanticMatch
 from app.models.entities import (
@@ -15,7 +17,9 @@ from app.models.entities import (
     PolicySnapshotItem,
     PolicyStatus,
     PolicyVersion,
+    PostingVersion,
 )
+from app.repositories import policies as policy_repository
 from app.repositories import sessions as session_repository
 from app.schemas.ai import AgentTurn, ComplianceCheckOutput, PolicyAssessment
 from app.schemas.sessions import ComplianceSessionCreate
@@ -150,6 +154,56 @@ async def test_invalid_exact_cache_entry_is_recomputed(db: AsyncSession) -> None
     assert len(ai.compliance_calls) == 2
 
 
+async def test_executor_rejects_a_tool_not_offered_for_the_current_state(
+    db: AsyncSession,
+) -> None:
+    snapshot = await policy_snapshot(db)
+    session = await compliance_session(db, snapshot)
+    executor = AgentToolExecutor(
+        db,
+        session,
+        FakeAI(),
+        FakeIndex(),
+        allowed_tool_names={"run_compliance_check"},
+    )
+
+    result = await executor.execute(
+        "ask_recruiter",
+        {"question": "Which location applies?", "reason": "Scope is missing."},
+    )
+
+    assert result == {
+        "error": "Tool ask_recruiter is not available in the current session state",
+        "retryable": True,
+    }
+    assert session.status == ComplianceSessionStatus.INVESTIGATING.value
+
+
+async def test_agent_state_includes_steps_added_after_the_session_was_loaded(
+    db: AsyncSession,
+) -> None:
+    snapshot = await policy_snapshot(db)
+    session = await compliance_session(db, snapshot)
+    await session_repository.add_step(
+        db,
+        session.id,
+        kind="tool",
+        name="read_policy",
+        output_data={"policy_key": "POLICY_001"},
+    )
+    await db.commit()
+
+    state = await build_agent_state(db, session)
+
+    assert state["recent_activity"][-1] == {
+        "kind": "tool",
+        "name": "read_policy",
+        "status": "completed",
+        "input": {},
+        "output": {"policy_key": "POLICY_001"},
+    }
+
+
 async def test_completion_rejects_missing_or_unresolved_policy_assessments(
     db: AsyncSession,
 ) -> None:
@@ -199,6 +253,29 @@ async def test_completion_rejects_an_unapproved_agent_revision(db: AsyncSession)
     }
 
 
+async def test_completion_uses_the_session_start_time_for_an_expiring_policy(
+    db: AsyncSession,
+    monkeypatch,
+) -> None:
+    snapshot = await policy_snapshot(db, count=1)
+    session = await compliance_session(db, snapshot)
+    pinned_snapshot = await policy_repository.get_snapshot(db, snapshot.id)
+    pinned_snapshot.items[0].policy_version.expires_at = session.created_at + timedelta(minutes=1)
+    await db.commit()
+    ai = FakeAI(output_factory=output_factory({}))
+    await run_compliance_check(db, session, ai)
+    monkeypatch.setattr(
+        policy_repository,
+        "utc_now",
+        lambda: session.created_at + timedelta(days=1),
+    )
+    executor = AgentToolExecutor(db, session, ai, FakeIndex())
+
+    result = await executor.execute("complete_session", {"summary": "Ready to publish"})
+
+    assert result["status"] == ComplianceSessionStatus.READY_TO_PUBLISH.value
+
+
 async def test_completion_rejects_findings_from_a_previous_location_scope(
     db: AsyncSession,
 ) -> None:
@@ -235,7 +312,7 @@ async def test_completion_rejects_findings_from_a_previous_location_scope(
     }
 
 
-async def test_revision_rejects_undeclared_changes(db: AsyncSession) -> None:
+async def test_revision_is_reconstructed_from_declared_changes(db: AsyncSession) -> None:
     snapshot = await policy_snapshot(db, count=1)
     session = await compliance_session(db, snapshot)
     policy_id = snapshot.items[0].policy_version_id
@@ -249,9 +326,6 @@ async def test_revision_rejects_undeclared_changes(db: AsyncSession) -> None:
     result = await executor.execute(
         "propose_revision",
         {
-            "revised_text": (
-                "Build and operate reliable Go services for our learning platform. Extra change."
-            ),
             "changes": [
                 {
                     "original_text": "Python",
@@ -263,10 +337,12 @@ async def test_revision_rejects_undeclared_changes(db: AsyncSession) -> None:
         },
     )
 
-    assert result == {
-        "error": "The revised posting contains changes that were not declared",
-        "retryable": True,
-    }
+    assert result["status"] == ComplianceSessionStatus.WAITING_FOR_APPROVAL.value
+    stored_version = await db.get(PostingVersion, session.current_posting_version_id)
+    assert stored_version is not None
+    assert stored_version.content == (
+        "Build and operate reliable Go services for our learning platform."
+    )
 
 
 async def test_revision_accepts_a_declared_sentence_deletion_without_double_spacing(
@@ -289,7 +365,6 @@ async def test_revision_accepts_a_declared_sentence_deletion_without_double_spac
     result = await executor.execute(
         "propose_revision",
         {
-            "revised_text": "Build reliable Python services. Mentor teammates.",
             "changes": [
                 {
                     "original_text": "Recent graduates preferred.",
@@ -337,12 +412,38 @@ async def test_human_approval_records_and_resolves_reviewed_findings(
     assert findings[0].resolved is True
 
 
+async def test_human_review_rechecks_status_inside_the_write_transaction(
+    db: AsyncSession,
+) -> None:
+    snapshot = await policy_snapshot(db, count=1)
+    session = await compliance_session(db, snapshot)
+    session.status = ComplianceSessionStatus.NEEDS_REVIEW.value
+    await db.commit()
+    await db.execute(
+        update(type(session))
+        .where(type(session).id == session.id)
+        .values(status=ComplianceSessionStatus.FAILED.value)
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
+
+    with pytest.raises(ValueError, match="does not require human review"):
+        await session_repository.add_human_review(
+            db,
+            session,
+            reviewer_name="Stale reviewer",
+            decision="approve",
+            notes=None,
+        )
+
+
 async def test_policy_search_uses_pinned_canonical_policy_text(
     db: AsyncSession,
 ) -> None:
     snapshot = await policy_snapshot(db, count=1)
     session = await compliance_session(db, snapshot)
-    pinned_version = snapshot.items[0].policy_version
+    pinned_snapshot = await policy_repository.get_snapshot(db, snapshot.id)
+    pinned_version = pinned_snapshot.items[0].policy_version
     index = FakeIndex(
         matches=[
             SemanticMatch(
@@ -399,7 +500,7 @@ async def test_agent_rejects_a_turn_without_a_tool_call(db: AsyncSession) -> Non
         FakeIndex(),
     )
 
-    with pytest.raises(AgentToolError, match="did not select a tool"):
+    with pytest.raises(AgentToolError, match="must select exactly one available tool"):
         await agent.run(db, session.id)
 
     steps = list(

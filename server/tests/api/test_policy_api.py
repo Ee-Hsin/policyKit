@@ -2,8 +2,10 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints import policies as policy_endpoints
-from app.models.entities import ComplianceSessionStatus
+from app.models.entities import ComplianceSessionStatus, FindingStatus
+from app.repositories import policies as policy_repository
 from app.repositories import sessions as session_repository
+from app.schemas.ai import PolicyAssessment
 
 POLICY_REQUEST = {
     "key": "GLOBAL_AGE_001",
@@ -72,6 +74,89 @@ async def test_session_requires_a_published_policy_snapshot(
     )
 
 
+async def test_session_rejects_scope_values_that_could_skip_policies(
+    api_client: httpx.AsyncClient,
+) -> None:
+    response = await api_client.post(
+        "/api/v1/compliance-sessions",
+        json={
+            **SESSION_REQUEST,
+            "employment_type": "full-time",
+            "platform": "PolicyKit",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+async def test_policy_input_normalizes_scope_and_rejects_unknown_values(
+    api_client: httpx.AsyncClient,
+) -> None:
+    normalized = await api_client.post(
+        "/api/v1/policies",
+        json={
+            **POLICY_REQUEST,
+            "key": "NY_AGE_001",
+            "jurisdictions": ["New York"],
+            "employment_types": ["full_time"],
+            "platforms": ["policykit"],
+        },
+    )
+    invalid = await api_client.post(
+        "/api/v1/policies",
+        json={
+            **POLICY_REQUEST,
+            "key": "UNKNOWN_SCOPE_001",
+            "jurisdictions": ["Atlantis"],
+            "employment_types": ["full-time"],
+            "platforms": ["PolicyKit"],
+        },
+    )
+    invalid_canonical = await api_client.post(
+        "/api/v1/policies",
+        json={
+            **POLICY_REQUEST,
+            "key": "INVALID_CODE_001",
+            "jurisdictions": ["US-NYX"],
+        },
+    )
+
+    assert normalized.status_code == 201
+    assert normalized.json()["versions"][0]["jurisdictions"] == ["US-NY"]
+    assert invalid.status_code == 422
+    assert invalid_canonical.status_code == 422
+
+
+async def test_policy_input_preserves_the_canonical_canada_scope(
+    api_client: httpx.AsyncClient,
+) -> None:
+    response = await api_client.post(
+        "/api/v1/policies",
+        json={
+            **POLICY_REQUEST,
+            "key": "CA_AGE_001",
+            "jurisdictions": ["CA"],
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["versions"][0]["jurisdictions"] == ["CA"]
+
+
+async def test_policy_patch_rejects_null_for_required_fields(
+    api_client: httpx.AsyncClient,
+) -> None:
+    created = await api_client.post("/api/v1/policies", json=POLICY_REQUEST)
+    payload = created.json()
+
+    response = await api_client.patch(
+        f"/api/v1/policies/{payload['id']}/versions/{payload['versions'][0]['id']}",
+        json={"title": None, "jurisdictions": None},
+    )
+
+    assert response.status_code == 422
+
+
 async def test_admin_can_publish_a_policy_and_session_is_pinned_to_its_snapshot(
     api_client: httpx.AsyncClient, monkeypatch
 ) -> None:
@@ -116,6 +201,68 @@ async def test_session_approval_and_publish_endpoints_enforce_state(
     )
     assert publication.status_code == 409
     assert publication.json()["detail"] == "Only a ready posting can be published"
+
+
+async def test_message_response_includes_the_recorded_user_step(
+    api_client: httpx.AsyncClient,
+    db: AsyncSession,
+    monkeypatch,
+) -> None:
+    await create_and_publish_policy(api_client, monkeypatch)
+    created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
+    session_id = created.json()["id"]
+    session = await session_repository.get_session(db, session_id)
+    session.status = ComplianceSessionStatus.WAITING_FOR_INFORMATION.value
+    session.current_question = "Which location should be used?"
+    await db.commit()
+
+    response = await api_client.post(
+        f"/api/v1/compliance-sessions/{session_id}/messages",
+        json={"message": "Use New York."},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == ComplianceSessionStatus.QUEUED.value
+    assert payload["steps"][-1]["kind"] == "user_message"
+    assert payload["steps"][-1]["input_data"] == {"message": "Use New York."}
+
+
+async def test_publish_response_includes_the_publication_step(
+    api_client: httpx.AsyncClient,
+    db: AsyncSession,
+    monkeypatch,
+) -> None:
+    await create_and_publish_policy(api_client, monkeypatch)
+    created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
+    session_id = created.json()["id"]
+    session = await session_repository.get_session(db, session_id)
+    snapshot = await policy_repository.get_snapshot(db, session.policy_snapshot_id)
+    policy_version_id = snapshot.items[0].policy_version_id
+    await session_repository.replace_findings(
+        db,
+        session,
+        [
+            PolicyAssessment(
+                policy_id=policy_version_id,
+                status=FindingStatus.NO_VIOLATION,
+                reason="The posting contains no prohibited age preference.",
+            )
+        ],
+    )
+    session.status = ComplianceSessionStatus.READY_TO_PUBLISH.value
+    await db.commit()
+
+    response = await api_client.post(
+        f"/api/v1/compliance-sessions/{session_id}/publish",
+        json={"publisher_name": "Test recruiter"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == ComplianceSessionStatus.PUBLISHED.value
+    assert payload["steps"][-1]["kind"] == "publication"
+    assert payload["steps"][-1]["output_data"] == {"publisher_name": "Test recruiter"}
 
 
 async def test_reviewer_cannot_approve_an_unchecked_escalated_session(

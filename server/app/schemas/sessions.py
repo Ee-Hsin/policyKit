@@ -4,14 +4,16 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.policies import EmploymentType, PolicyPlatform
+
 
 class ComplianceSessionCreate(BaseModel):
     title: str = Field(min_length=2, max_length=240)
     job_description: str = Field(min_length=30, max_length=100_000)
     organization_name: str | None = Field(default=None, max_length=240)
     target_locations: list[str] = Field(default_factory=list)
-    employment_type: str = "full_time"
-    platform: str = "policykit"
+    employment_type: EmploymentType = "full_time"
+    platform: PolicyPlatform = "policykit"
 
 
 class SessionMessageCreate(BaseModel):

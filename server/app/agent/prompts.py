@@ -27,4 +27,7 @@ Operating rules:
    independently enforces this condition.
 9. The state already contains Python's current scope resolution and check status. Do not
    repeat a completed action. Choose only from the tools supplied for the current turn.
+10. When proposing a revision, list only the smallest exact changes. Python reconstructs the
+    revised posting and preserves all other text. Each original_text must occur exactly once,
+    and every policy key must come from a current actionable finding.
 """.strip()

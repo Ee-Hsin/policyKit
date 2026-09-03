@@ -24,7 +24,7 @@ from app.models.entities import (
 )
 from app.repositories import policies as policy_repository
 from app.repositories import sessions as session_repository
-from app.schemas.ai import ProposedRevision
+from app.schemas.ai import ProposedEditSet, ProposedRevision
 from app.services.compliance_checker import run_compliance_check
 from app.services.jurisdictions import resolve_jurisdictions
 
@@ -63,6 +63,7 @@ async def build_agent_state(db: AsyncSession, session: ComplianceSession) -> dic
         db, session.id, posting_version_id=session.current_posting_version_id
     )
     changes = await session_repository.proposed_changes_for_session(db, session.id)
+    steps = await session_repository.steps_for_session(db, session.id)
     jurisdictions, unresolved = resolve_jurisdictions(session.posting.target_locations)
     applicable_policy_ids: set[str] = set()
     if session.policy_snapshot_id and jurisdictions and not unresolved:
@@ -74,6 +75,7 @@ async def build_agent_state(db: AsyncSession, session: ComplianceSession) -> dic
                 jurisdictions=jurisdictions,
                 employment_type=session.posting.employment_type,
                 platform=session.posting.platform,
+                at=session.created_at,
             )
         }
     checked_policy_ids = [finding.policy_version_id for finding in findings]
@@ -81,7 +83,7 @@ async def build_agent_state(db: AsyncSession, session: ComplianceSession) -> dic
         len(checked_policy_ids) == len(applicable_policy_ids)
         and set(checked_policy_ids) == applicable_policy_ids
     )
-    recent_steps = session.steps[-16:]
+    recent_steps = steps[-16:]
     return {
         "goal": session.goal,
         "session": {
@@ -182,19 +184,23 @@ class AgentToolExecutor:
         session: ComplianceSession,
         ai: AIGateway,
         index: ChromaIndex,
+        allowed_tool_names: set[str] | None = None,
     ):
         self.db = db
         self.session = session
         self.ai = ai
         self.index = index
+        self.allowed_tool_names = allowed_tool_names
 
     async def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        handler = getattr(self, f"_tool_{name}", None)
-        if handler is None:
-            raise AgentToolError(f"Unknown tool {name}")
         session_id = self.session.id
         started = monotonic()
         try:
+            if self.allowed_tool_names is not None and name not in self.allowed_tool_names:
+                raise AgentToolError(f"Tool {name} is not available in the current session state")
+            handler = getattr(self, f"_tool_{name}", None)
+            if handler is None:
+                raise AgentToolError(f"Unknown tool {name}")
             result = await handler(arguments)
         except Exception as error:
             await self.db.rollback()
@@ -338,10 +344,8 @@ class AgentToolExecutor:
         return {"matches": results, "source": "human_reviewed_precedents"}
 
     async def _tool_propose_revision(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        revision = ProposedRevision.model_validate(arguments)
+        edit_set = ProposedEditSet.model_validate(arguments)
         current_text = self.session.current_posting_version.content
-        if revision.revised_text == current_text:
-            raise AgentToolError("The proposed revision does not change the posting")
         findings = await session_repository.findings_for_session(
             self.db,
             self.session.id,
@@ -355,7 +359,7 @@ class AgentToolExecutor:
         if not actionable_policy_keys:
             raise AgentToolError("Run a check with actionable findings before proposing edits")
         replacements: list[tuple[int, int, str]] = []
-        for change in revision.changes:
+        for change in edit_set.changes:
             if change.original_text == change.replacement_text:
                 raise AgentToolError("A proposed edit does not change its source text")
             if current_text.count(change.original_text) != 1:
@@ -388,8 +392,12 @@ class AgentToolExecutor:
             revised_parts.extend((current_text[cursor:start], replacement))
             cursor = end
         revised_parts.append(current_text[cursor:])
-        if "".join(revised_parts) != revision.revised_text:
-            raise AgentToolError("The revised posting contains changes that were not declared")
+        revision = ProposedRevision(
+            revised_text="".join(revised_parts),
+            changes=edit_set.changes,
+        )
+        if revision.revised_text == current_text:
+            raise AgentToolError("The proposed revision does not change the posting")
         proposed = await session_repository.create_proposed_revision(
             self.db, self.session, revision
         )
@@ -439,10 +447,11 @@ class ComplianceAgent:
 
             state = await build_agent_state(db, session)
             started = monotonic()
+            offered_tools = available_agent_tools(state)
             turn = await self.ai.run_agent(
                 instructions=AGENT_INSTRUCTIONS,
                 state=state,
-                tools=available_agent_tools(state),
+                tools=offered_tools,
             )
             duration_ms = round((monotonic() - started) * 1_000)
             session.agent_iterations += 1
@@ -460,10 +469,16 @@ class ComplianceAgent:
                 output_tokens=turn.output_tokens,
             )
             await db.commit()
-            if not turn.tool_calls:
-                raise AgentToolError("Agent did not select a tool")
+            if len(turn.tool_calls) != 1:
+                raise AgentToolError("Agent must select exactly one available tool")
 
-            executor = AgentToolExecutor(db, session, self.ai, self.index)
+            executor = AgentToolExecutor(
+                db,
+                session,
+                self.ai,
+                self.index,
+                allowed_tool_names={tool["name"] for tool in offered_tools},
+            )
             for call in turn.tool_calls:
                 await executor.execute(call.name, call.arguments)
                 session = await session_repository.get_session(db, session_id)

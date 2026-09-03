@@ -92,6 +92,14 @@ async def list_sessions(
     return list(result)
 
 
+async def steps_for_session(db: AsyncSession, session_id: str) -> list[AgentStep]:
+    return list(
+        await db.scalars(
+            select(AgentStep).where(AgentStep.session_id == session_id).order_by(AgentStep.sequence)
+        )
+    )
+
+
 async def claim_next_queued_session(db: AsyncSession) -> ComplianceSession | None:
     statement = (
         select(ComplianceSession)
@@ -314,6 +322,12 @@ async def add_human_review(
     notes: str | None,
     precedent: tuple[ComplianceFinding, str] | None = None,
 ) -> HumanReview:
+    status_statement = select(ComplianceSession.status).where(ComplianceSession.id == session.id)
+    if db.bind and db.bind.dialect.name == "postgresql":
+        status_statement = status_statement.with_for_update()
+    current_status = await db.scalar(status_statement)
+    if current_status != ComplianceSessionStatus.NEEDS_REVIEW.value:
+        raise ValueError("Session does not require human review")
     findings = await findings_for_session(
         db,
         session.id,
@@ -377,6 +391,7 @@ async def validate_publishable(db: AsyncSession, session: ComplianceSession) -> 
         jurisdictions=jurisdictions,
         employment_type=session.posting.employment_type,
         platform=session.posting.platform,
+        at=session.created_at,
     )
     if not policies:
         raise ValueError("No applicable policies were found")

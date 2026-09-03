@@ -108,6 +108,7 @@ async def run_compliance_check(
         jurisdictions=jurisdictions,
         employment_type=session.posting.employment_type,
         platform=session.posting.platform,
+        at=session.created_at,
     )
     if not policies:
         raise InvalidComplianceOutputError("No applicable policies were found")

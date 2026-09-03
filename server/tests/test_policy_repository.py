@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.entities import PolicyStatus
 from app.repositories import policies as repository
@@ -67,6 +67,31 @@ async def test_published_versions_are_immutable_and_snapshots_preserve_history(
     )
 
 
+async def test_stale_draft_instance_cannot_modify_a_published_version(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as setup_db:
+        policy = await repository.create_policy(setup_db, policy_create())
+        policy_id = policy.id
+        version_id = policy.versions[0].id
+
+    async with session_factory() as stale_db, session_factory() as publisher_db:
+        await repository.get_policy(stale_db, policy_id)
+        await repository.publish_policy_version(publisher_db, policy_id, version_id)
+
+        with pytest.raises(repository.PolicyStateError, match="immutable"):
+            await repository.update_draft(
+                stale_db,
+                policy_id,
+                version_id,
+                PolicyDraftUpdate(rule_text="Mutated after publication."),
+            )
+
+    async with session_factory() as verify_db:
+        stored = await repository.get_policy(verify_db, policy_id)
+        assert stored.versions[0].rule_text == "Include a salary range."
+
+
 async def test_new_snapshot_includes_every_currently_published_policy(
     db: AsyncSession,
 ) -> None:
@@ -105,4 +130,47 @@ async def test_publish_rejects_future_activation_without_a_scheduler(
     )
 
     with pytest.raises(repository.PolicyStateError, match="Scheduled activation"):
+        await repository.publish_policy_version(db, policy.id, policy.versions[0].id)
+
+
+async def test_publish_rejects_naive_future_activation_without_type_error(
+    db: AsyncSession,
+) -> None:
+    policy = await repository.create_policy(
+        db,
+        policy_create().model_copy(update={"effective_at": datetime(2100, 1, 1)}),
+    )
+
+    with pytest.raises(repository.PolicyStateError, match="Scheduled activation"):
+        await repository.publish_policy_version(db, policy.id, policy.versions[0].id)
+
+
+async def test_publish_rejects_an_expired_policy_without_an_explicit_effective_time(
+    db: AsyncSession,
+) -> None:
+    policy = await repository.create_policy(
+        db,
+        policy_create().model_copy(
+            update={"effective_at": None, "expires_at": datetime(2025, 1, 1, tzinfo=UTC)}
+        ),
+    )
+
+    with pytest.raises(repository.PolicyStateError, match="Expired"):
+        await repository.publish_policy_version(db, policy.id, policy.versions[0].id)
+
+
+async def test_publish_rejects_a_policy_with_past_effective_and_expiration_times(
+    db: AsyncSession,
+) -> None:
+    policy = await repository.create_policy(
+        db,
+        policy_create().model_copy(
+            update={
+                "effective_at": datetime(2024, 1, 1, tzinfo=UTC),
+                "expires_at": datetime(2025, 1, 1, tzinfo=UTC),
+            }
+        ),
+    )
+
+    with pytest.raises(repository.PolicyStateError, match="Expired"):
         await repository.publish_policy_version(db, policy.id, policy.versions[0].id)

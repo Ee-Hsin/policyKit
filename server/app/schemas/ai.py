@@ -51,6 +51,9 @@ class ProposedEdit(BaseModel):
     policy_keys: list[str] = Field(min_length=1)
 
 
-class ProposedRevision(BaseModel):
-    revised_text: str = Field(min_length=30)
+class ProposedEditSet(BaseModel):
     changes: list[ProposedEdit] = Field(min_length=1)
+
+
+class ProposedRevision(ProposedEditSet):
+    revised_text: str = Field(min_length=30)
