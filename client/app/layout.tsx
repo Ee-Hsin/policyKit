@@ -1,8 +1,20 @@
 import type { Metadata } from "next";
+import { DM_Mono, Instrument_Sans } from "next/font/google";
 import Link from "next/link";
 import { MotionProvider } from "@/components/MotionProvider";
 import "./globals.css";
 import "./taste.css";
+
+const instrumentSans = Instrument_Sans({
+  subsets: ["latin"],
+  variable: "--font-instrument-sans",
+});
+
+const dmMono = DM_Mono({
+  subsets: ["latin"],
+  variable: "--font-dm-mono",
+  weight: ["400", "500"],
+});
 
 export const metadata: Metadata = {
   title: "PolicyKit",
@@ -11,7 +23,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" data-scroll-behavior="smooth">
+    <html
+      className={`${instrumentSans.variable} ${dmMono.variable}`}
+      lang="en"
+      data-scroll-behavior="smooth"
+    >
       <body>
         <a className="skip-link" href="#main-content">Skip to main content</a>
         <header className="site-header">
@@ -19,8 +35,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             <Link className="brand" href="/" aria-label="PolicyKit home">
               <span className="brand__mark" aria-hidden="true">
                 <svg viewBox="0 0 24 24">
-                  <path d="M12 3.2 19 6v5.4c0 4.4-2.8 7.8-7 9.6-4.2-1.8-7-5.2-7-9.6V6l7-2.8Z" />
-                  <path d="m9 12 2 2 4-4" />
+                  <rect x="3.5" y="3.5" width="17" height="17" />
+                  <path d="m8 12 2.5 2.5L16 9" />
                 </svg>
               </span>
               <span>PolicyKit</span>

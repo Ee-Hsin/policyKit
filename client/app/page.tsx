@@ -119,7 +119,7 @@ export default function NewPostingPage() {
     <div className="start-shell">
       <section className="start-intro motion-reveal" aria-labelledby="start-heading">
         <p className="signal-label signal-label--ink"><span /> Job posting workspace</p>
-        <h1 id="start-heading">Create a clear job post. Check it before it goes live.</h1>
+        <h1 id="start-heading">Job posts, ready to publish.</h1>
         <p>
           Start with a few ideas or bring a complete posting. You control every draft and decide
           when compliance checks run.
