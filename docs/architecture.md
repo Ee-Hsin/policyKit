@@ -1,212 +1,319 @@
 # How PolicyKit works
 
-This page explains the system without assuming that you have read the code.
+This guide explains the product and code without assuming prior knowledge.
 
-The code uses some technical names. On this page:
+PolicyKit has two connected jobs:
 
-- **Policy** means a rule for job posts.
-- **Session** means one review of one job post.
-- **Model** means OpenAI software that reads text and returns an answer.
-- **Server** means the Python program that receives requests from the website.
-- **Database** means the saved records that PolicyKit can read again later.
-- **Background reviewer** means the part of the Python program that completes reviews
-  after the website sends them.
+1. Help a recruiter create and improve a job posting.
+2. Check the saved posting against company policies and local requirements before
+   publication.
 
-## The short version
+The recruiter controls when models are used. Creating a workspace, typing, saving,
+viewing history, and discarding a suggestion do not call OpenAI. Optional writing help
+and **Check latest draft** do.
 
-PolicyKit has five main parts:
+## Terms used in the code
 
-1. **The website** collects a job post and displays the result.
-2. **The Python server** receives requests and enforces the safety rules.
-3. **The main database** stores the official rules and every review step.
-4. **OpenAI models** choose the next allowed step and compare posts with rules.
-5. **ChromaDB** helps find related rule text and past examples.
+- A **posting** is the job title, organization, hiring locations, employment type, and
+  job-description text.
+- A **posting version** is one saved copy of the posting text. It does not change after it
+  is saved.
+- A **session** is the workspace that holds the current posting version, compliance work,
+  and human decisions.
+- A **policy** is one rule for job postings.
+- A **policy snapshot** is the fixed set of policy versions used after a session starts
+  its first compliance run.
+- A **finding** is one policy result and its supporting evidence.
+- The **router** is the model that chooses the agent's next allowed action.
+- The **checker** is the model that assesses every policy supplied by Python.
+- A **reviewed precedent** is an earlier policy decision approved by a person and made
+  available as supporting search material.
 
-The OpenAI models never control the database or mark a post as published. They ask Python
-to perform an action. Python checks the request before it does anything.
+## System overview
 
 ```mermaid
-flowchart TB
-    user["Recruiter or policy manager"] --> website["Website"]
-    website --> python["Python server"]
-    python <--> database[("Main database")]
-    python --> background["Background reviewer"]
-    background <--> openai["OpenAI"]
-    background <--> search[("Chroma search")]
+flowchart LR
+    recruiter["Recruiter"] --> next["Next.js website"]
+    policyManager["Policy manager"] --> next
+    next --> api["FastAPI API"]
+    api --> python["Python services and safety checks"]
+    python <--> postgres[("PostgreSQL")]
+    python -->|"Optional writing request"| writer["OpenAI writing model"]
+    python -->|"Explicit Check latest draft"| worker["Background agent worker"]
+    worker <--> router["OpenAI router model"]
+    worker --> checker["OpenAI checker model"]
+    worker -.->|"supporting search"| chroma[("ChromaDB")]
+    postgres --> indexer["Index policies and reviewed precedents"]
+    indexer --> textNumbers["OpenAI turns text into numbers"]
+    textNumbers --> chroma
 ```
 
-## A job-post review from start to finish
+The OpenAI models do not connect to PostgreSQL or publish a posting. They return text,
+labeled policy results, or a request to use one allowed tool. Python validates the
+result before it changes saved data.
 
-### 1. The recruiter submits the post
-
-The website sends the job text, company name, job type, and hiring locations to the Python
-server.
-
-The server creates a review record in PostgreSQL, the main database. It also records the
-exact versions of the rules that this review will use.
-
-### 2. The background reviewer starts
-
-A small Python program looks for reviews that are waiting. It takes one review and gives
-the next-step OpenAI model:
-
-- The current job post
-- The known hiring information
-- A short record of recent actions
-- The actions that are allowed now
-
-The model must choose one action. For example, it can ask to check the rules or ask the
-recruiter for a missing location.
-
-### 3. Python chooses the rules
-
-The model does not choose the required rules.
-
-Python reads the fixed rule list saved when the review started. It selects every rule that
-applies to the hiring locations and job type, plus rules that apply to all posts.
-
-### 4. The checking model reads every rule
-
-Python sends the job post and the complete required rule list to a second OpenAI model.
-For each rule, this model must return:
-
-- Whether the post passes, fails, or needs human judgment
-- The reason
-- The exact problem text, when there is a problem
-- The location of that text inside the post
-- How sure the model is about its answer
-
-### 5. Python checks the answer
-
-Python rejects the answer if:
-
-- A required rule is missing
-- A rule appears more than once
-- The answer contains a rule that was not requested
-- Quoted text does not match the job post
-- The quoted text location is wrong and cannot be corrected safely
-
-Only checked answers are saved as results.
-
-### 6. PolicyKit chooses what happens next
+## User flow
 
 ```mermaid
 flowchart TD
-    result["Rule check finishes"] --> choice{"What did it find?"}
-    choice -->|No problems| ready["Post is ready"]
-    choice -->|Clear text problem| edit["Suggest a small change"]
-    choice -->|Missing information| ask["Ask the recruiter"]
-    choice -->|Needs judgment| review["Ask a policy reviewer"]
-    edit --> approve{"Recruiter approves?"}
-    approve -->|Yes| again["Check the changed post again"]
-    approve -->|No| ask
-    again --> result
+    start["Start a posting"] --> method{"Choose a starting path"}
+    method -->|"Start from ideas"| generate["Ask writing model for a first draft"]
+    method -->|"Paste a posting"| paste["Use supplied text without a model call"]
+    generate --> workspace["Editable workspace"]
+    paste --> workspace
+    workspace -->|"Save"| saved["Create a new fixed posting version"]
+    saved --> workspace
+    workspace -->|"Optional writing request"| suggestion["Preview model text"]
+    suggestion -->|"Accept into editor"| workspace
+    suggestion -->|"Discard"| workspace
+    workspace -->|"Check latest draft"| run["Full agent run"]
+    run --> result{"Current result"}
+    result -->|"Finding or question"| decision["Recruiter or policy reviewer decides"]
+    decision -->|"Posting changes"| stale["Previous check becomes stale"]
+    stale --> workspace
+    result -->|"All publication rules pass"| ready["Ready for internal publication"]
 ```
 
-## Why a review keeps the same rules
+### 1. Start from ideas
 
-Policy managers can publish new rule versions at any time. The rules used to judge a post
-must not change halfway through its review.
+The recruiter supplies a title and role notes. Organization, locations, and other known
+facts can also be supplied. **Generate draft** sends those fields to the OpenAI writing
+model. The model is instructed to organize only the supplied facts and not claim that the
+result is compliant.
 
-PolicyKit therefore saves the exact rule versions when the review begins.
+The result is a preview in the browser. The recruiter can edit it before opening a
+workspace. Opening the workspace saves version 1. It does not start compliance work.
 
-Example:
+### 2. Paste an existing posting
 
-1. A review starts with Rule A version 2.
-2. A policy manager publishes Rule A version 3.
-3. The existing review continues with version 2.
-4. A new review uses version 3.
+The recruiter can paste a complete posting and open the workspace. PolicyKit saves the
+text as version 1 without calling OpenAI or starting the agent.
 
-This saved list is called a “policy snapshot” in the code. In plain language, it is the
-fixed list of rule versions used by one review.
+### 3. Edit and save directly
 
-## What is stored in PostgreSQL?
+The editor works like a normal text editor. Saving creates version 2, version 3, and so
+on. Earlier versions stay unchanged.
 
-PostgreSQL stores the information that must not be lost:
+Every save includes the identifier of the version that the recruiter loaded. PostgreSQL
+locks the session while it saves. If another browser has already saved a newer version,
+the old save is rejected instead of overwriting the newer work. The recruiter can then
+choose which text to keep.
 
-- Official rules and all published versions
-- The fixed rule list for each review
-- Original and changed job posts
-- Each action requested by the model
-- Results, quoted problem text, how long each check took, and which model was used
-- Suggested text changes
-- Recruiter approvals
-- Policy-reviewer decisions
-- Test examples
-- Reusable results for an identical post and rule list
+A recruiter can load earlier text as a new draft. This does not delete any history.
+The browser also keeps unsaved editor text on that device. If the recruiter returns after
+an accidental navigation or refresh, PolicyKit restores the text. If another browser
+saved a newer version, the recruiter must choose which text to keep.
 
-Published rule text cannot be changed. A new version must be created instead.
+### 4. Ask for optional writing help
 
-If two people try to publish rules or review the same post at the same time, PostgreSQL
-makes those updates happen in a safe order. One old browser window cannot overwrite a
-newer decision.
+Writing help is separate from compliance.
 
-## What is ChromaDB used for?
+- With a selection, PolicyKit sends the selected text and up to 1,500 characters from
+  each side for context. The rest of the draft is not sent.
+- Without a selection, PolicyKit sends the full draft. Full-draft help is limited to
+  12,000 characters.
 
-ChromaDB is a search helper. It can find related text even when the wording is different.
-For example, a search for “age preference” can find a rule that talks about “recent
-graduates.”
+PolicyKit checks that the saved base version is still current before and after the model
+call. It returns a preview and does not save the model output. The recruiter can accept
+the preview into the local editor, edit it again, or discard it. Only a later Save action
+creates a posting version.
 
-ChromaDB stores search copies, not official rules. Python uses each search result to read
-the official text from PostgreSQL before showing it to the model.
+If the model returns the same text, PolicyKit shows an error instead of presenting an
+empty suggestion as a useful change.
 
-ChromaDB does not:
+### 5. Start the full compliance agent
 
-- Choose the complete rule list
-- Decide whether a post passes
-- Replace PostgreSQL
-- Publish anything
+The recruiter saves the draft and selects **Check latest draft**. This is the explicit
+action that starts the full agent.
 
-Its data can be rebuilt from PostgreSQL. The setup instructions in the main README show
-the command.
+On the first run, Python pins the latest published policy snapshot to the session. Later
+runs in the same session keep that snapshot. This prevents a policy change from altering
+the meaning of work already in progress.
 
-## When is an old result reused?
+The session enters a waiting list. A background worker takes it and gives the router:
 
-Checking a post with OpenAI costs time and money. PolicyKit can reuse a saved answer only
-when all important inputs are exactly the same:
+- The complete saved posting.
+- Hiring locations, employment type, and platform.
+- Current findings and recent activity.
+- Only the tools allowed in the current state.
 
-- Job-post text
-- Fixed rule list
-- Required rule versions
-- OpenAI model
-- Model instructions
-- Answer format
+The router must choose exactly one allowed tool. It can request a complete compliance
+check, read or search policies, search reviewed precedents, ask the recruiter a question,
+propose a limited compliance edit, complete the session, or send it to a person. Python
+can offer different tools as the state changes.
 
-Python checks a reused answer again before saving it to the new review record. The review
-also records that it used the saved result and did not need a new OpenAI call.
+### 6. Check every applicable policy
 
-## What must be true before a post is ready?
+The router cannot choose which required policies to skip. Python resolves the hiring
+locations and selects every applicable policy version from the pinned snapshot. It then
+sends the checker:
 
-Python checks all of these conditions:
+- The full saved posting text.
+- The full text and labeled fields for every applicable policy.
 
-- Every location is understood.
-- Every required rule has one result.
-- No open problem or unclear answer remains.
-- A person approved any model-suggested text.
-- The results belong to the current version of the post.
+For each policy, the checker returns pass, violation, or uncertain, plus a reason,
+confidence, and exact evidence when required.
 
-These checks run once when the model says the work is complete and again when someone
-asks PolicyKit to record the post as published.
+Python rejects the checker result if:
 
-## What happens when something fails?
+- An applicable policy is missing.
+- A policy appears more than once.
+- An unknown policy appears.
+- Violation evidence is missing.
+- Quoted evidence is not present at the stated location and cannot be repaired safely.
 
-- An incomplete model answer is rejected.
-- A bad text quote is rejected.
-- A failed action is saved so the model can choose a better next step.
-- A review with too many model steps is sent to a person.
-- Work interrupted by a stopped process is returned to the waiting list.
-- A failed OpenAI request returns a clear error and does not erase saved work.
+Only validated findings are stored.
 
-## Running the background reviewer separately
+### 7. Handle findings and model-proposed text
 
-For development, the Python server can also run the background reviewer. In a larger
-setup, they can run as separate programs while both use the same PostgreSQL database.
-The main README contains the command for this setup.
+The agent can read the pinned policy text and use Chroma to find related policies or
+reviewed precedents. Search is supporting context only. It does not change the required
+policy list or decide that the posting passes.
 
-## Limits of the current project
+When the agent proposes a compliance edit, Python reconstructs the new text from declared
+replacements. It rejects duplicate source text, overlapping replacements, unsupported
+policy references, and changes that do not alter the posting.
 
-This prototype does not have sign-in or separate customer accounts. Real production use
-also needs secure key storage, access checks, request limits, monitoring, and rules for
-deleting old data.
+The proposed version waits for recruiter approval. Model text is never accepted
+automatically. If the recruiter approves it, the explicitly requested review continues
+by checking the approved version again. If the recruiter rejects it, the earlier version
+remains current and the agent asks what should change.
 
-The included rules are examples. They are not legal advice.
+When a finding needs policy judgment, a policy reviewer can approve an exception, request
+changes, or reject the posting. The review request includes the exact posting version the
+reviewer saw. The server rejects the decision if the posting changed. A rejected posting
+must be edited and saved as a new version before it can be checked again. The human
+decision and the exact findings it covered are stored.
+
+## Current and stale results
+
+Every finding is linked to the exact posting version that the checker read. The API
+reports one of four check states:
+
+- `never_run`: no version has completed a check.
+- `running`: an explicitly requested run is queued or in progress.
+- `current`: the last completed check belongs to the current saved version.
+- `stale`: a newer posting version exists.
+
+Old findings remain in the audit history but cannot satisfy the publication rules for a
+newer version. A stale result does not trigger a model call by itself. The recruiter saves
+the new text and selects **Check latest draft** when ready.
+
+## Publication rules
+
+Python marks a posting ready only when:
+
+- Every hiring location is understood.
+- At least one policy applies.
+- Every applicable policy has exactly one result for the current posting version.
+- No unresolved violation or uncertain result remains.
+- A person approved the current version if the compliance agent proposed it.
+
+Python evaluates these conditions when the agent requests completion and again when the
+recruiter records publication. Direct API calls cannot bypass them. Publication in this
+prototype changes only the PolicyKit record; it does not contact a job board.
+
+## What PostgreSQL stores
+
+PostgreSQL is the official record for:
+
+- Policies and all policy versions.
+- Policy snapshots.
+- Posting metadata and all saved posting versions.
+- The current posting-version pointer.
+- Agent steps, tool requests, durations, and token counts for router and checker calls.
+- Findings and evidence tied to a posting version.
+- Proposed compliance changes and recruiter decisions.
+- Policy-reviewer decisions and promoted precedents.
+- Saved checker results that can be reused only for exact matching inputs.
+- Authored evaluation cases.
+
+Saved posting versions and published policy versions are fixed records. New text creates
+a new version. PostgreSQL row locks and base-version checks prevent an old browser from
+silently replacing a newer version or publishing it with an older result.
+
+Initial writing output and writing-suggestion previews are not saved by their endpoints.
+If the recruiter accepts that text and saves the draft, the resulting posting version is
+stored. Unsaved editor text is stored only in that browser until it is saved or discarded.
+
+## What ChromaDB stores
+
+ChromaDB stores search copies of published policies and human-reviewed precedent
+excerpts. OpenAI turns the text into numbers that can be compared by meaning.
+For example, “age preference” can find a policy that mentions “recent graduates.”
+
+Python uses a search result only to find an identifier. It reads the official record from
+PostgreSQL and ignores results outside the session's pinned policy snapshot. ChromaDB is
+not required for typing, saving, selecting applicable policies, checking complete policy
+coverage, or publishing. Its data can be rebuilt from PostgreSQL.
+
+## Exact checker result reuse
+
+A compliance check uses OpenAI and can cost money. PolicyKit can reuse a saved checker
+result only when these inputs match exactly:
+
+- Posting text.
+- Policy snapshot.
+- Applicable policy-version identifiers.
+- Checker model.
+- Checker reasoning setting.
+- Checker prompt and answer format version.
+
+Python validates a saved answer again before using it. Reusing it records zero new
+checker tokens. Router and search steps in the surrounding agent run can still use
+OpenAI.
+
+## Failure and retry behavior
+
+- The OpenAI client has a timeout and can retry one provider request up to two times.
+- A writing error returns a controlled message. The browser keeps the recruiter's input,
+  and the recruiter decides whether to try again.
+- Tool errors are recorded and returned to the router as retryable. The router can choose
+  another allowed action.
+- A full agent run has a step limit. Reaching it sends the session to human review.
+- If the worker process stops during a run, work left in progress is returned to the queue
+  after the configured stale time.
+- If a run still fails, PolicyKit keeps the posting versions and marks the session failed.
+  The recruiter can explicitly start another check of the current saved version.
+
+## Privacy and cost boundaries
+
+No OpenAI call occurs when a recruiter types, saves, views history, loads old text,
+accepts a preview into the local editor, or discards a preview.
+
+OpenAI receives data only for an AI operation:
+
+- Role fields and notes for initial draft generation.
+- Selected text plus nearby context, or the limited full draft, for writing help.
+- The full saved posting and session state for routing.
+- The full saved posting and applicable policy text for checking.
+- Search text for query embeddings.
+- Published policy text and reviewed precedent excerpts during indexing.
+
+`OPENAI_STORE_RESPONSES=false` is the default. It controls the request's OpenAI response
+storage setting, but data sent to the provider remains subject to its API data rules.
+
+The prototype has output limits, timeouts, limited provider retries, a maximum number of
+agent steps, and exact checker result reuse. It does not have sign-in, separation between
+customer accounts, rate limiting, or an API spending budget. It must not be exposed to
+the public internet or used for confidential production data without those controls.
+
+## Running the worker separately
+
+During local development, the FastAPI process runs the background agent worker by
+default. For a separate worker process, set `RUN_AGENT_WORKER=false` for the API process
+and run:
+
+```bash
+cd server
+.venv/bin/python -m app.scripts.run_worker
+```
+
+Both processes use the same PostgreSQL database.
+
+## Prototype limits
+
+PolicyKit is a demonstration, not legal advice. It has no sign-in, access roles,
+customer-account separation, rate limits, production secret management, external job
+board integration, monitoring, or data-retention controls. A qualified person must review
+real policies and publication decisions.

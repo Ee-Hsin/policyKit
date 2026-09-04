@@ -1,85 +1,165 @@
 # How PolicyKit is tested
 
-PolicyKit uses two kinds of tests.
+PolicyKit separates repeatable code tests from live model evaluations. The normal tests
+do not call OpenAI or use API credit. Live evaluations are optional and must be requested
+with `--live`.
 
-## Tests that do not call OpenAI
+## Repeatable tests without OpenAI
 
-Most tests use a small replacement for the OpenAI model. The replacement returns a known
-answer, so the test is fast, repeatable, and free.
+Most backend tests use a small model replacement that returns a known answer. This makes
+the tests fast, repeatable, and free.
 
-These tests check that:
+The tests cover:
 
-- Every required rule is included
-- Missing, repeated, or unexpected rule answers are rejected
-- Quoted problem text matches the job post
-- Published rule versions cannot change
-- Old reviews keep their original rule versions
-- A saved answer is reused only for an identical post and rule list
-- The model cannot request an action that is not currently allowed
-- Suggested changes cannot alter unrelated text
-- Recruiter approval is required
-- A post cannot be published before all checks pass
-- Interrupted work can continue
-- Two people cannot overwrite each other's rule or review decisions
+- Starting a session as an editable draft without a policy snapshot or background work.
+- Generating a writing preview without saving a job posting.
+- Saving direct recruiter edits as new versions that cannot later change.
+- Rejecting an unchanged save or a save based on an older version.
+- Keeping writing suggestions as previews until the recruiter saves the text.
+- Returning a clear error when the writing model returns unchanged text.
+- Limiting selected writing help to the selection and nearby context.
+- Rechecking the saved base version after a writing-model request finishes.
+- Starting the full agent only after an explicit compliance request.
+- Pinning the policy snapshot and policy evaluation time at the first explicit check.
+- Reporting whether a check is never run, running, current, or stale.
+- Keeping old-version findings from approving a newer posting version.
+- Preventing an old browser action from publishing or resuming work for a newer version.
+- Preventing an old reviewer tab from deciding a newer posting version.
+- Requiring an edit and new saved version after a policy reviewer rejects a posting.
+- Sending every applicable policy to the checker.
+- Rejecting missing, repeated, or unexpected policy results.
+- Checking that quoted evidence matches the saved posting.
+- Reusing a checker answer only for identical inputs.
+- Restricting the router to actions allowed in the current state.
+- Reconstructing agent-proposed text from declared changes.
+- Requiring a person to approve model-proposed compliance text.
+- Blocking publication until the current version passes every publication rule.
+- Recovering interrupted background work.
+- Keeping published policy versions and old policy snapshots unchanged.
 
-Run these tests with:
+Run the backend tests:
 
 ```bash
 cd server
 .venv/bin/pytest -q
 ```
 
-## Tests that call OpenAI
+Run backend lint and formatting checks:
 
-The project also contains 13 example job posts with expected answers. These examples
+```bash
+cd server
+.venv/bin/ruff check app tests
+.venv/bin/ruff format --check app tests
+.venv/bin/python -m compileall -q app tests
+.venv/bin/pip check
+```
+
+Check the website:
+
+```bash
+cd client
+npm run typecheck
+npm run build
+```
+
+## Authored compliance examples
+
+The repository contains 13 example job postings with expected policy results. They
 include:
 
-- Posts that should pass
-- Clear age or protected-group preferences
-- Missing New York or California pay ranges
-- Illegal work
-- Requests for sensitive personal data
-- Unpaid trial work
-- A case that should be sent to a person
-- Several problems in one post
-- Text inside a post that tries to give instructions to the model
+- Postings that should pass.
+- Clear age and protected-group preferences.
+- Missing New York or California pay ranges.
+- Illegal work.
+- Requests for sensitive personal data.
+- Unpaid trial work.
+- Worker classification that needs human judgment.
+- Several problems in one posting.
+- Text inside a posting that tries to instruct the model.
 
-The test compares the model's answer for every rule with the expected answer.
+The local fixture check validates the example structure and policy keys without calling
+OpenAI:
 
-Run a small number first because these tests use a small amount of your OpenAI balance:
+```bash
+cd server
+.venv/bin/python -m app.evals.runner
+```
+
+## Live checker evaluations
+
+The live evaluation sends each example posting and its applicable policy text to the
+configured OpenAI checker. It compares every policy result with the authored expected
+result.
+
+Run a small set first because this uses API credit:
 
 ```bash
 cd server
 .venv/bin/python -m app.evals.runner --live --limit 5
 ```
 
-Run all examples with:
+Run all authored examples:
 
 ```bash
 .venv/bin/python -m app.evals.runner --live
 ```
 
-## How the result numbers work
+The report includes:
 
-- **Assessment accuracy:** How often the model gave the expected answer for a rule.
-- **Violation recall:** Of all problems marked in the test examples, how many the model
-  found.
-- **Violation precision:** Of all problems reported by the model, how many were marked as
-  problems in the test examples.
+- **Exact cases:** postings where every policy result matched.
+- **Assessment accuracy:** the share of individual policy results that matched.
+- **Violation recall:** the share of expected problems that the checker found.
+- **Violation precision:** the share of reported problems that were expected.
+- **Tokens:** the total checker input and output tokens for the run.
 
-On September 3, 2026, the model gave the expected answer for all 13 examples. Assessment
-accuracy, violation recall, and violation precision were all 100%.
+On September 3, 2026, the checker matched all 13 authored cases. Assessment accuracy,
+violation recall, and violation precision were 100%. This is a historical result, not a
+promise about later runs. Model behavior can change.
 
-This result does not promise that every future run will be perfect. Model answers can
-change. Run the live tests again after changing:
+On September 4, 2026, a smaller live check also passed all 3 selected cases. It used
+7,317 input tokens and 5,501 output tokens. This was a final live check of the changes
+described here. It used `gpt-5.4-mini` with medium reasoning and this command:
 
-- The OpenAI model
-- Instructions sent to the model
-- Rule text
-- Location or job-type matching
-- The required answer format
+```bash
+.venv/bin/python -m app.evals.runner --live --limit 3
+```
 
-A change should not be released if it causes the model to miss an important problem that
-the earlier version found.
+The three cases were `age_preference_violation`, `california_complete_pay_range`, and
+`compliant_software_engineer_new_york`.
 
-The test examples demonstrate the product. They are not legal advice.
+Run the live checker evaluations again after changing:
+
+- The checker model or reasoning setting.
+- Checker instructions or required answer format.
+- Policy text or where a policy applies.
+- Location or employment-type matching.
+- Evidence checks or the inputs used to decide whether an old answer can be reused.
+
+A change should not be released if it causes the checker to miss an important problem
+that the earlier version found.
+
+## What the live checker evaluation does not test
+
+The current live suite evaluates the compliance checker. It does not evaluate:
+
+- Initial draft quality.
+- Writing-suggestion quality.
+- Whether a human recruiter accepts a suggestion.
+- Router tool choice across a complete agent run.
+- User satisfaction or publication outcomes.
+
+The code tests still check the expected writing and router behavior with fixed model responses.
+Before changing a writing or router prompt for production use, add a separate authored
+evaluation set for that operation. Keep it opt-in, report its token use, and start with a
+small limit.
+
+## Cost and privacy during tests
+
+Normal tests, lint, type checks, builds, fixture validation, typing, saving, viewing, and
+discarding previews do not call OpenAI.
+
+Commands with `--live` call OpenAI. Rebuilding Chroma data also asks OpenAI to turn text into numbers
+with published policy text and reviewed precedent excerpts. Live testing can send example
+posting and policy text to OpenAI, so do not put confidential data in evaluation cases.
+
+The examples and results demonstrate the product. They are not legal advice.
