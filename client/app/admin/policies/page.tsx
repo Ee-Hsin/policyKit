@@ -70,7 +70,12 @@ export default function PoliciesPage() {
           <section className="policy-table-card">
             <div className="table-toolbar">
               <label className="search-field">
-                <span aria-hidden="true">⌕</span>
+                <span aria-hidden="true">
+                  <svg viewBox="0 0 20 20">
+                    <circle cx="8.5" cy="8.5" r="4.5" />
+                    <path d="m12 12 4 4" />
+                  </svg>
+                </span>
                 <span className="sr-only">Search policies</span>
                 <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by policy, key, or jurisdiction" />
               </label>

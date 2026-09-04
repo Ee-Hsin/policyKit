@@ -16,11 +16,11 @@ function MotionController({ scope }: { scope: RefObject<HTMLDivElement | null> }
       gsap.utils.toArray<HTMLElement>(".motion-reveal").forEach((element) => {
         gsap.fromTo(
           element,
-          { opacity: 0, y: 42 },
+          { opacity: 0, y: 24 },
           {
             opacity: 1,
             y: 0,
-            duration: 0.9,
+            duration: 0.65,
             ease: "power3.out",
             scrollTrigger: {
               trigger: element,
@@ -31,41 +31,17 @@ function MotionController({ scope }: { scope: RefObject<HTMLDivElement | null> }
         );
       });
 
-      gsap.utils.toArray<HTMLElement>(".image-reveal").forEach((element) => {
-        gsap.fromTo(
-          element,
-          { opacity: 0.42, scale: 0.84 },
-          {
-            opacity: 1,
-            scale: 1,
-            ease: "none",
-            scrollTrigger: {
-              trigger: element,
-              start: "top 92%",
-              end: "center 48%",
-              scrub: 0.7,
-            },
-          },
-        );
-      });
-
-      const words = gsap.utils.toArray<HTMLElement>(".scrub-word");
-      if (words.length) {
-        gsap.fromTo(
-          words,
-          { opacity: 0.12 },
-          {
-            opacity: 1,
-            stagger: 0.04,
-            ease: "none",
-            scrollTrigger: {
-              trigger: ".scrub-copy",
-              start: "top 84%",
-              end: "bottom 48%",
-              scrub: 0.8,
-            },
-          },
-        );
+      const panels = gsap.utils.toArray<HTMLElement>(
+        ".policy-table-card, .admin-card, .posting-panel, .agent-panel, .findings-section",
+      );
+      if (panels.length) {
+        gsap.fromTo(panels, { opacity: 0.84, y: 10 }, {
+          opacity: 1,
+          y: 0,
+          duration: 0.55,
+          ease: "power2.out",
+          stagger: 0.05,
+        });
       }
     },
     { scope },
