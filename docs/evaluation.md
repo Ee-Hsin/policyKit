@@ -1,52 +1,85 @@
-# Evaluation strategy
+# How PolicyKit is tested
 
-PolicyKit separates deterministic tests from live model evals.
+PolicyKit uses two kinds of tests.
 
-## Deterministic tests
+## Tests that do not call OpenAI
 
-The regular test suite uses fake model and vector-index boundaries. It verifies:
+Most tests use a small replacement for the OpenAI model. The replacement returns a known
+answer, so the test is fast, repeatable, and free.
 
-- Full applicable-policy coverage
-- Duplicate, missing, and unexpected policy rejection
-- Exact evidence text and offset validation
-- Immutable published policy versions and historical snapshots
-- Exact-cache keys and reuse
-- Agent step and completion limits
-- Recruiter question, approval, review, and publication state gates
-- API contracts without network calls or API credit
+These tests check that:
 
-## Model eval cases
+- Every required rule is included
+- Missing, repeated, or unexpected rule answers are rejected
+- Quoted problem text matches the job post
+- Published rule versions cannot change
+- Old reviews keep their original rule versions
+- A saved answer is reused only for an identical post and rule list
+- The model cannot request an action that is not currently allowed
+- Suggested changes cannot alter unrelated text
+- Recruiter approval is required
+- A post cannot be published before all checks pass
+- Interrupted work can continue
+- Two people cannot overwrite each other's rule or review decisions
 
-The seeded eval set includes compliant controls, clear violations, subtle language,
-multiple violations, negation, missing compensation details, and prompt-injection text
-embedded inside a job posting.
+Run these tests with:
 
-There are 13 authored cases. Each case fixes the expected status for every applicable
-policy, so a run can measure both missed violations and unsupported findings.
+```bash
+cd server
+.venv/bin/pytest -q
+```
 
-Primary metrics are:
+## Tests that call OpenAI
 
-- Violation recall and false-negative rate
-- Per-policy precision, recall, and F1
-- Evidence citation accuracy
-- Complete policy coverage
-- Uncertainty and escalation rate
-- Repeatability
-- Latency, tokens, and estimated cost
+The project also contains 13 example job posts with expected answers. These examples
+include:
 
-## Running live evals
+- Posts that should pass
+- Clear age or protected-group preferences
+- Missing New York or California pay ranges
+- Illegal work
+- Requests for sensitive personal data
+- Unpaid trial work
+- A case that should be sent to a person
+- Several problems in one post
+- Text inside a post that tries to give instructions to the model
 
-Live evals are opt-in:
+The test compares the model's answer for every rule with the expected answer.
+
+Run a small number first because these tests use a small amount of your OpenAI balance:
 
 ```bash
 cd server
 .venv/bin/python -m app.evals.runner --live --limit 5
 ```
 
-Start with a small limit. Review failures before running the complete suite. A model or
-prompt change should not ship when it increases the critical false-negative count.
+Run all examples with:
 
-The September 3, 2026 full run passed 13 of 13 exact cases with 100% assessment accuracy,
-violation recall, and violation precision. This is a recorded verification result, not a
-guarantee of future model behavior. Repeat the live suite after changes to models, prompts,
-structured schemas, policy text, or policy scope logic.
+```bash
+.venv/bin/python -m app.evals.runner --live
+```
+
+## How the result numbers work
+
+- **Assessment accuracy:** How often the model gave the expected answer for a rule.
+- **Violation recall:** Of all problems marked in the test examples, how many the model
+  found.
+- **Violation precision:** Of all problems reported by the model, how many were marked as
+  problems in the test examples.
+
+On September 3, 2026, the model gave the expected answer for all 13 examples. Assessment
+accuracy, violation recall, and violation precision were all 100%.
+
+This result does not promise that every future run will be perfect. Model answers can
+change. Run the live tests again after changing:
+
+- The OpenAI model
+- Instructions sent to the model
+- Rule text
+- Location or job-type matching
+- The required answer format
+
+A change should not be released if it causes the model to miss an important problem that
+the earlier version found.
+
+The test examples demonstrate the product. They are not legal advice.

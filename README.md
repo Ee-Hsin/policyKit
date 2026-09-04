@@ -1,182 +1,191 @@
 # PolicyKit
 
-PolicyKit is a pre-publication compliance agent for job postings. It investigates a
-draft, checks the complete applicable policy set, asks for missing facts, proposes exact
-edits, and stops for human approval before publication.
+PolicyKit helps a recruiter check a job post before it goes live.
+
+It reads the post, checks the rules that apply, points to problem text, and suggests small
+changes. A person must approve any suggested change. The software checks the changed post
+again before it can be marked ready.
+
+In this prototype, “publish” means recording inside PolicyKit that the post passed its
+checks. PolicyKit does not send the post to LinkedIn, Indeed, or another job site.
+
+If these terms are new:
+
+- A **rule** is a requirement that a job post must follow. The code sometimes calls it a
+  policy.
+- A **review** is one complete check of one job post. The code sometimes calls it a
+  session.
+- A **model** is the OpenAI software that reads text and returns an answer.
+- A **database** is where PolicyKit saves rules, job posts, and results.
+- A **server** is the part of PolicyKit that receives requests from the website and does
+  the work.
+- An **API key** is a private password that lets PolicyKit use OpenAI. Never share it or
+  commit it to Git.
 
 ![PolicyKit recruiter experience](docs/images/policykit-home.png)
 
-The main design rule is simple: the model chooses the next investigation action, while
-Python controls what the action can do. OpenAI cannot access the database, edit a policy,
-approve its own revision, or publish a posting.
+## What happens when someone submits a job post?
 
-## What the product does
+1. The recruiter enters the job post, company name, job type, and hiring locations.
+2. PolicyKit finds the rules for those locations and that job type.
+3. PolicyKit saves the exact rule versions used for this review. Later rule changes cannot
+   change the result of a review that already started.
+4. An OpenAI model compares the job post with every required rule.
+5. PolicyKit's server checks that no rule was skipped and that every quoted phrase exists
+   in the post.
+6. If information is missing, PolicyKit asks the recruiter a clear question.
+7. If the post breaks a rule, PolicyKit can suggest a small text change.
+8. The recruiter approves or rejects that change.
+9. PolicyKit checks the approved text again.
+10. The post is marked ready only when every required rule passes or a policy reviewer
+    resolves the remaining question.
 
-A recruiter enters a job description, hiring locations, employer, and employment type.
-PolicyKit then:
+![A suggested change waiting for recruiter approval](docs/images/policykit-review.png)
 
-1. Resolves the locations to canonical jurisdictions such as `US`, `US-NY`, or `GB`.
-2. Pins the session to an immutable PostgreSQL policy snapshot.
-3. Gives the agent only the tools that are valid for the current session state.
-4. Runs a typed classifier against every applicable policy, not a retrieved sample.
-5. Validates full policy coverage and every quoted evidence offset in Python.
-6. Asks one focused question when required information is missing.
-7. Builds any proposed revision from declared edits on the server.
-8. Waits for recruiter approval, then checks the approved revision again.
-9. Re-runs the deterministic publication gate before recording publication.
+## The most important safety rule
 
-![A proposed revision waiting for recruiter approval](docs/images/policykit-review.png)
+The OpenAI model can choose what to check next, but it cannot make changes by itself.
 
-## System architecture
+PolicyKit's server decides:
+
+- Which rules must be checked
+- Which actions the model may request
+- Whether quoted evidence is correct
+- Whether a suggested change follows the allowed edit limits
+- Whether a person approved the change
+- Whether the post is ready
+
+OpenAI cannot connect directly to the database or publish a job post.
+
+## How the parts fit together
 
 ```mermaid
 flowchart LR
-    recruiter["Recruiter"] --> web["Next.js web app"]
-    admin["Policy admin"] --> web
-    web --> api["FastAPI"]
-    api --> db[("PostgreSQL\nsource of truth")]
-    api --> queue["Durable queued session"]
-    queue --> worker["Python agent worker"]
-    worker --> agent["Tool-calling orchestrator"]
-    agent --> orchestrator["OpenAI agent model"]
-    agent --> tools["State-scoped Python tools"]
-    tools --> checker["Full-policy checker"]
-    checker --> classifier["OpenAI structured classifier"]
-    tools --> db
-    tools <--> chroma[("ChromaDB\nderived index")]
-    chroma --> embeddings["OpenAI embeddings"]
+    person["Recruiter or policy manager"] --> website["PolicyKit website"]
+    website --> server["Python server"]
+    server --> database[("Main database")]
+    server --> background["Background job reviewer"]
+    background --> model["OpenAI model chooses the next allowed step"]
+    background --> check["OpenAI model checks each required rule"]
+    background --> database
+    background <--> search[("Chroma search helper")]
 ```
 
-There are two model roles:
+The two OpenAI calls have different jobs:
 
-- The **orchestrator** sees the goal, the current posting, session state, recent activity,
-  and the tools available in that state. It chooses exactly one action at a time.
-- The **classifier** has no tools. Python supplies every applicable policy from the pinned
-  snapshot and requires one structured assessment per policy.
+- The **next-step model** chooses one allowed action, such as checking the post, asking a
+  question, or suggesting a change.
+- The **checking model** compares the post with a list of rules supplied by Python. It
+  cannot choose which rules to skip.
 
-This split lets the workflow be agentic without giving the model authority over policy
-scope or publication.
+## What each technology does
 
-## Technology responsibilities
-
-| Technology | Responsibility |
+| Technology | Plain-English job |
 | --- | --- |
-| Python | Agent runtime, tool permissions, validation, recovery, cache keys, and evals |
-| FastAPI | Recruiter sessions, policy administration, human review, and publication APIs |
-| OpenAI | Agent tool selection, structured policy assessment, and embeddings |
-| PostgreSQL | Policies, snapshots, posting versions, findings, approvals, audit steps, and exact cache |
-| ChromaDB | Rebuildable semantic search over policies and human-reviewed precedents |
-| Next.js | Recruiter workspace and policy-administration interface |
+| Python | Runs the review and checks that every step is allowed |
+| FastAPI | Receives requests from the website |
+| OpenAI | Chooses review steps, checks rules, and turns text into numbers used to compare meaning |
+| PostgreSQL | Stores the official rules, job posts, results, changes, and approvals |
+| ChromaDB | Helps find related rules and past reviewed examples |
+| Next.js | Displays the website used by recruiters and policy managers |
 
-PostgreSQL is always authoritative. Chroma returns candidates for investigation only.
-Python restricts policy search results to the session's pinned snapshot and hydrates the
-canonical text from PostgreSQL. Retrieval never narrows the mandatory full-policy check.
+PostgreSQL is the official record. ChromaDB is only a search helper. A Chroma search can
+help the model understand a result, but it cannot decide which rules must be checked or
+whether a post passes.
 
-## Session lifecycle
+PolicyKit saves each step. This includes the text that was checked, the rules used, the
+model's results, suggested changes, approvals, how long the check took, and which model
+was used.
 
-```mermaid
-stateDiagram-v2
-    [*] --> queued: Recruiter submits draft
-    queued --> investigating: Worker claims session
-    investigating --> waiting_for_information: Required fact is missing
-    waiting_for_information --> queued: Recruiter answers
-    investigating --> waiting_for_approval: Agent proposes exact edits
-    waiting_for_approval --> queued: Recruiter approves revision
-    waiting_for_approval --> waiting_for_information: Recruiter requests changes
-    investigating --> needs_review: Policy judgment is ambiguous
-    needs_review --> ready_to_publish: Reviewer resolves findings
-    investigating --> ready_to_publish: Complete clean check
-    ready_to_publish --> published: Publication gate passes
-    investigating --> failed: Unrecoverable error
-```
+If the background reviewer stops unexpectedly, it can continue unfinished work later.
 
-Every transition is stored. The audit trail includes tool inputs and outputs, model
-response IDs, token use, latency, evidence, posting versions, exact edits, and human
-decisions. A periodic worker recovery pass returns interrupted sessions to the queue.
+## Checks that must pass before publication
 
-## Publication safeguards
+PolicyKit will not mark a post ready unless:
 
-`complete_session` and the publication endpoint both enforce these conditions:
+- Every hiring location is understood.
+- Every required rule was checked.
+- No open problem or unclear result remains.
+- A person approved any text suggested by the model.
+- The final result belongs to the current version of the job post.
 
-- Every recruiter location resolves to a supported concrete jurisdiction.
-- The latest posting has one assessment for every applicable policy.
-- No unresolved `violation` or `uncertain` finding remains.
-- An agent-authored posting version has explicit recruiter approval.
-- The assessment set matches the current posting version and the pinned policy snapshot.
+The same checks run again when the recruiter records the post as published inside
+PolicyKit. Sending a request directly to the server cannot skip them.
 
-Policy applicability is evaluated at the session start time. A policy that expires while a
-review is in progress remains part of that review, while new sessions use the current
-policy set. Published policy versions are immutable. PostgreSQL locks serialize policy
-publication and human-review decisions so stale writes cannot change history.
+### Why the rule list does not change during a review
 
-## Policy administration
+When a review begins, PolicyKit records the exact rule versions it will use.
 
-An administrator can create, test, version, and publish policies from the web interface.
-A policy includes its canonical scope, enforcement level, rule, remediation, exceptions,
-and both violation and compliant examples.
+For example:
 
-![Versioned policies and Chroma index status](docs/images/policykit-policy-library.png)
+1. A review starts with Pay Rule version 2.
+2. A policy manager later publishes Pay Rule version 3.
+3. The existing review continues with version 2.
+4. New reviews use version 3.
 
-Publishing a version retires the prior live version and creates a new immutable snapshot.
-Sessions already in progress keep their original snapshot. Policy and location inputs are
-normalized at the API boundary so free-form strings cannot silently skip a scoped rule.
+This makes old results easier to understand and reproduce.
 
-Policy states are:
+## Managing rules
 
-```text
-draft -> testing -> published -> retired
-```
+A policy manager can create, test, update, and publish rules in the website.
 
-## Agent tools
+![Published rules and their search status](docs/images/policykit-policy-library.png)
 
-The orchestrator can receive these strict tools, depending on the current state:
+Each rule contains:
 
-| Tool | Purpose |
-| --- | --- |
-| `set_hiring_locations` | Save a location supplied by the recruiter |
-| `run_compliance_check` | Check every applicable policy |
-| `search_policies` | Retrieve related indexed policy passages for investigation |
-| `read_policy` | Read one canonical policy from the pinned snapshot |
-| `search_reviewed_precedents` | Retrieve similar human-reviewed evidence |
-| `propose_revision` | Declare the smallest supported edits; Python reconstructs the draft |
-| `ask_recruiter` | Pause for a missing business fact |
-| `escalate_to_reviewer` | Request policy judgment from a person |
-| `complete_session` | Ask Python to apply the clean-check gate |
+- A title and unique key
+- The places and job types where it applies
+- The rule itself
+- An explanation of why it exists
+- A recommended fix
+- Examples that fail
+- Examples that pass
+- Any exceptions
 
-The runtime rejects unknown tools, tools that were not offered in the current state,
-multiple tool calls in one turn, overlapping edits, non-unique source text, edits tied to
-the wrong finding, and changes outside the declared edit set.
+A published rule cannot be edited. The policy manager creates a new version instead. Old
+reviews keep the old version, while new reviews use the latest published version.
 
-## Local setup
+## Run PolicyKit on your computer
 
-Requirements:
+The rest of this page is for someone who wants to run or change the code. You can stop
+here if you only want to understand the product.
 
-- Python 3.12+
-- Node.js 22+
-- PostgreSQL 14+
+These steps use Terminal, the text-based app for giving commands to your computer.
 
-Copy the environment template and add an OpenAI project key:
+You need:
+
+- Python 3.12 or newer
+- Node.js 22 or newer
+- PostgreSQL 14 or newer
+- Docker Desktop if you want Docker to start PostgreSQL for you
+- An OpenAI API key
+
+Copy the example settings file:
 
 ```bash
 cp .env.example .env
 ```
 
-Start PostgreSQL with Docker:
+Add your OpenAI key to `.env`.
+
+### 1. Start the database
+
+With Docker:
 
 ```bash
 docker compose up -d postgres
 ```
 
-Then set:
+Then use this value in `.env`:
 
 ```dotenv
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/policykit
 ```
 
-You can instead use a local PostgreSQL install and create the database with
-`createdb policykit`. The default local URL is `postgresql+asyncpg:///policykit`.
+If PostgreSQL is installed directly on your computer, run `createdb policykit`. The
+default address is `postgresql+asyncpg:///policykit`.
 
-Install, migrate, and seed the backend:
+### 2. Prepare the Python server
 
 ```bash
 cd server
@@ -186,20 +195,26 @@ python3.12 -m venv .venv
 .venv/bin/python -m app.scripts.seed_data
 ```
 
-The seed is deterministic and makes no OpenAI calls. Build the derived Chroma index when
-the API key is ready:
+The last command adds example rules and test cases. It does not use your OpenAI balance.
+
+Build the Chroma search data:
 
 ```bash
 .venv/bin/python -m app.scripts.reindex
 ```
 
-Start FastAPI and its in-process worker:
+This command uses the OpenAI API to turn the rule text into numbers that Chroma can
+compare. It is the only reason Chroma can find text with a similar meaning.
+
+Start the Python server:
 
 ```bash
 .venv/bin/uvicorn app.main:app --reload --port 8000
 ```
 
-Start the web app in another terminal:
+### 3. Start the website
+
+Open another terminal:
 
 ```bash
 cd client
@@ -207,35 +222,34 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The OpenAPI schema is at
-[http://localhost:8000/api/v1/openapi.json](http://localhost:8000/api/v1/openapi.json).
-If the frontend uses another origin, add it to `CORS_ORIGINS`.
+Open [http://localhost:3000](http://localhost:3000).
 
-## Configuration
+## Important settings
 
-The complete template is in [`.env.example`](.env.example). Important settings include:
+All settings are listed in [`.env.example`](.env.example).
 
-| Setting | Default | Meaning |
-| --- | --- | --- |
-| `OPENAI_AGENT_MODEL` | `gpt-5.4-mini` | Chooses the next allowed tool |
-| `OPENAI_CHECKER_MODEL` | `gpt-5.4-mini` | Produces typed per-policy assessments |
-| `OPENAI_CHECKER_REASONING_EFFORT` | `medium` | Checker reasoning level |
-| `OPENAI_STORE_RESPONSES` | `false` | OpenAI response-storage choice |
-| `CHROMA_MODE` | `persistent` | `persistent`, `http`, or `disabled` |
-| `RUN_AGENT_WORKER` | `true` | Runs the queue worker with FastAPI |
-| `AGENT_MAX_STEPS` | `12` | Maximum investigation actions per run |
-| `AGENT_STALE_AFTER_SECONDS` | `300` | Interrupted-run recovery threshold |
+| Setting | What it controls |
+| --- | --- |
+| `OPENAI_AGENT_MODEL` | The model that chooses the next review step |
+| `OPENAI_CHECKER_MODEL` | The model that checks the rules |
+| `OPENAI_CHECKER_REASONING_EFFORT` | How much work the checking model uses before answering |
+| `OPENAI_STORE_RESPONSES` | Whether OpenAI stores model responses |
+| `CHROMA_MODE` | Whether Chroma runs on this computer, on another server, or is off |
+| `RUN_AGENT_WORKER` | Whether the Python server also runs the background reviewer |
+| `AGENT_MAX_STEPS` | The maximum number of steps in one review run |
+| `AGENT_STALE_AFTER_SECONDS` | How long to wait before restarting interrupted work |
 
-For a separate worker deployment, start the API with `RUN_AGENT_WORKER=false` and run:
+To run the background reviewer as its own program, set `RUN_AGENT_WORKER=false` for the
+Python server and run:
 
 ```bash
 cd server
 .venv/bin/python -m app.scripts.run_worker
 ```
 
-## Validation and evals
+## Check that the code works
 
-No-cost backend checks:
+These Python checks do not call OpenAI:
 
 ```bash
 cd server
@@ -247,7 +261,7 @@ cd server
 .venv/bin/python -m app.evals.runner
 ```
 
-Frontend checks:
+Check the website code:
 
 ```bash
 cd client
@@ -256,7 +270,7 @@ npm run build
 npm audit --audit-level=high
 ```
 
-Live evals are explicit because they use API credit:
+The live checks call OpenAI and use a small amount of your OpenAI balance:
 
 ```bash
 cd server
@@ -264,18 +278,23 @@ cd server
 .venv/bin/python -m app.evals.runner --live
 ```
 
-The September 3, 2026 verification run passed all 13 authored cases with 100% assessment
-accuracy, violation recall, and violation precision. The suite covers compliant controls,
-minimal pairs, multi-policy violations, missing pay ranges, uncertainty, illegal work,
-sensitive-data requests, and prompt injection inside untrusted posting text. Model results
-can vary, so the live suite should be rerun after prompt, model, policy, or schema changes.
+On September 3, 2026, all 13 live examples produced the expected answers. A future model
+run can differ, so run these checks again after changing a model, instruction, rule, or
+answer format.
 
-See [docs/evaluation.md](docs/evaluation.md) for metric definitions and
-[docs/architecture.md](docs/architecture.md) for the detailed data and trust boundaries.
+Read [how the system works](docs/architecture.md) or
+[how the test examples work](docs/evaluation.md) for more detail.
 
-## Production boundary
+## What is still needed before real production use?
 
-This repository is a working product prototype. It does not yet include an external
-identity provider or multi-tenant authorization. A production deployment must add
-authenticated recruiter, reviewer, and policy-admin roles at the FastAPI boundary, plus
-managed PostgreSQL, managed Chroma, secret management, rate limits, and monitoring.
+This project is a working prototype. Before a real company uses it, it needs:
+
+- Sign-in
+- Different access rights for recruiters, reviewers, and policy managers
+- Separation between customer accounts
+- Secure online storage for keys and passwords
+- Limits on repeated requests
+- Alerts when the service has a problem
+- Clear rules for how long data is kept
+
+The example rules are product demonstrations. They are not legal advice.

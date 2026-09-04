@@ -1,182 +1,212 @@
-# PolicyKit architecture
+# How PolicyKit works
 
-## Trust boundary
+This page explains the system without assuming that you have read the code.
 
-The Next.js application communicates only with FastAPI. OpenAI never has direct access to
-PostgreSQL, ChromaDB, the filesystem, human approval, or publication. The Python runtime
-validates each model-requested tool against the current session state.
+The code uses some technical names. On this page:
+
+- **Policy** means a rule for job posts.
+- **Session** means one review of one job post.
+- **Model** means OpenAI software that reads text and returns an answer.
+- **Server** means the Python program that receives requests from the website.
+- **Database** means the saved records that PolicyKit can read again later.
+- **Background reviewer** means the part of the Python program that completes reviews
+  after the website sends them.
+
+## The short version
+
+PolicyKit has five main parts:
+
+1. **The website** collects a job post and displays the result.
+2. **The Python server** receives requests and enforces the safety rules.
+3. **The main database** stores the official rules and every review step.
+4. **OpenAI models** choose the next allowed step and compare posts with rules.
+5. **ChromaDB** helps find related rule text and past examples.
+
+The OpenAI models never control the database or mark a post as published. They ask Python
+to perform an action. Python checks the request before it does anything.
 
 ```mermaid
 flowchart TB
-    subgraph client["User boundary"]
-        recruiter["Recruiter"]
-        reviewer["Human reviewer"]
-        admin["Policy administrator"]
-        next["Next.js"]
-        recruiter --> next
-        reviewer --> next
-        admin --> next
-    end
-
-    subgraph service["PolicyKit service boundary"]
-        api["FastAPI"]
-        worker["Durable Python worker"]
-        runtime["Agent runtime and state machine"]
-        gate["Deterministic validation and publication gate"]
-        db[("PostgreSQL")]
-        chroma[("ChromaDB")]
-        next --> api
-        api <--> db
-        api --> worker
-        worker --> runtime
-        runtime --> gate
-        gate <--> db
-        gate <--> chroma
-    end
-
-    subgraph model["Model boundary"]
-        agent["Tool-calling model"]
-        checker["Typed classifier"]
-        embed["Embedding model"]
-        runtime <--> agent
-        gate <--> checker
-        chroma <--> embed
-    end
+    user["Recruiter or policy manager"] --> website["Website"]
+    website --> python["Python server"]
+    python <--> database[("Main database")]
+    python --> background["Background reviewer"]
+    background <--> openai["OpenAI"]
+    background <--> search[("Chroma search")]
 ```
 
-Job descriptions, recruiter messages, retrieved passages, and tool output are untrusted
-data. They cannot change the runtime instructions or tool permissions.
+## A job-post review from start to finish
 
-## Request sequence
+### 1. The recruiter submits the post
+
+The website sends the job text, company name, job type, and hiring locations to the Python
+server.
+
+The server creates a review record in PostgreSQL, the main database. It also records the
+exact versions of the rules that this review will use.
+
+### 2. The background reviewer starts
+
+A small Python program looks for reviews that are waiting. It takes one review and gives
+the next-step OpenAI model:
+
+- The current job post
+- The known hiring information
+- A short record of recent actions
+- The actions that are allowed now
+
+The model must choose one action. For example, it can ask to check the rules or ask the
+recruiter for a missing location.
+
+### 3. Python chooses the rules
+
+The model does not choose the required rules.
+
+Python reads the fixed rule list saved when the review started. It selects every rule that
+applies to the hiring locations and job type, plus rules that apply to all posts.
+
+### 4. The checking model reads every rule
+
+Python sends the job post and the complete required rule list to a second OpenAI model.
+For each rule, this model must return:
+
+- Whether the post passes, fails, or needs human judgment
+- The reason
+- The exact problem text, when there is a problem
+- The location of that text inside the post
+- How sure the model is about its answer
+
+### 5. Python checks the answer
+
+Python rejects the answer if:
+
+- A required rule is missing
+- A rule appears more than once
+- The answer contains a rule that was not requested
+- Quoted text does not match the job post
+- The quoted text location is wrong and cannot be corrected safely
+
+Only checked answers are saved as results.
+
+### 6. PolicyKit chooses what happens next
 
 ```mermaid
-sequenceDiagram
-    actor R as Recruiter
-    participant W as Next.js
-    participant A as FastAPI
-    participant P as PostgreSQL
-    participant K as Agent worker
-    participant O as Orchestrator
-    participant C as Classifier
-
-    R->>W: Submit draft and hiring facts
-    W->>A: POST compliance session
-    A->>P: Pin latest policy snapshot and queue session
-    A-->>W: Session ID and queued state
-    K->>P: Claim queued session
-    K->>O: Current state and allowed tools
-    O-->>K: run_compliance_check
-    K->>P: Load complete applicable policy set
-    K->>C: Posting and typed policy payloads
-    C-->>K: One assessment per policy
-    K->>K: Validate coverage and evidence offsets
-    K->>P: Store findings, tokens, latency, and response ID
-    alt Clean posting
-        K->>P: Mark ready to publish
-    else Supported violation
-        K->>O: Findings and available tools
-        O-->>K: Exact proposed edits
-        K->>K: Reconstruct revision from declared edits
-        K->>P: Wait for recruiter approval
-        R->>W: Approve revision
-        W->>A: POST approval
-        A->>P: Queue approved version for a fresh check
-    else Missing fact or ambiguous policy
-        K->>P: Ask recruiter or request human review
-    end
+flowchart TD
+    result["Rule check finishes"] --> choice{"What did it find?"}
+    choice -->|No problems| ready["Post is ready"]
+    choice -->|Clear text problem| edit["Suggest a small change"]
+    choice -->|Missing information| ask["Ask the recruiter"]
+    choice -->|Needs judgment| review["Ask a policy reviewer"]
+    edit --> approve{"Recruiter approves?"}
+    approve -->|Yes| again["Check the changed post again"]
+    approve -->|No| ask
+    again --> result
 ```
 
-## Two model roles
+## Why a review keeps the same rules
 
-The orchestrator receives the publication goal, current posting, resolved scope, recent
-activity, and current-state tool schemas. It chooses one action. It does not receive the
-full policy catalog and cannot declare a posting compliant by itself.
+Policy managers can publish new rule versions at any time. The rules used to judge a post
+must not change halfway through its review.
 
-The classifier runs inside `run_compliance_check`. Python supplies every policy applicable
-to the session's immutable snapshot and requires one structured assessment per policy.
-The classifier has no tools and cannot choose a smaller policy set.
+PolicyKit therefore saves the exact rule versions when the review begins.
 
-## Durable state
+Example:
 
-PostgreSQL stores:
+1. A review starts with Rule A version 2.
+2. A policy manager publishes Rule A version 3.
+3. The existing review continues with version 2.
+4. A new review uses version 3.
 
-- Stable policy identities and immutable policy versions
-- Policy snapshots used by historical sessions
-- Original and agent-authored posting versions
-- Agent states, tool inputs and outputs, tokens, latency, and response IDs
-- Per-policy assessments and exact evidence offsets
-- Proposed changes and recruiter approvals
-- Human reviews and reviewed precedents
-- Authored eval cases
-- Exact classifier cache entries
+This saved list is called a “policy snapshot” in the code. In plain language, it is the
+fixed list of rule versions used by one review.
 
-The worker claims queued sessions with row locking on PostgreSQL. Each worker iteration
-also recovers sessions that stayed in `investigating` past the configured stale threshold.
+## What is stored in PostgreSQL?
 
-Policy changes lock the stable policy record. Publication also takes a PostgreSQL advisory
-transaction lock so concurrent policies receive distinct snapshot numbers. Human review
-locks and rechecks the session status before writing a decision. These rules prevent stale
-clients from modifying published content or overwriting another review.
+PostgreSQL stores the information that must not be lost:
 
-## Policy time model
+- Official rules and all published versions
+- The fixed rule list for each review
+- Original and changed job posts
+- Each action requested by the model
+- Results, quoted problem text, how long each check took, and which model was used
+- Suggested text changes
+- Recruiter approvals
+- Policy-reviewer decisions
+- Test examples
+- Reusable results for an identical post and rule list
 
-New policy versions cannot be published with a future effective time or an expired end
-time. A new snapshot contains only policy versions active at publication time. Each
-compliance session evaluates its pinned snapshot at the session start time. This makes an
-in-progress review reproducible if a policy expires before the recruiter finishes.
+Published rule text cannot be changed. A new version must be created instead.
 
-## Search and cache
+If two people try to publish rules or review the same post at the same time, PostgreSQL
+makes those updates happen in a safe order. One old browser window cannot overwrite a
+newer decision.
 
-ChromaDB has two derived collections:
+## What is ChromaDB used for?
 
-- `policy_chunks`
-- `reviewed_precedents`
+ChromaDB is a search helper. It can find related text even when the wording is different.
+For example, a search for “age preference” can find a rule that talks about “recent
+graduates.”
 
-OpenAI embeddings are supplied explicitly. ChromaDB returns candidate IDs and distances.
-Python rejects candidates outside the pinned snapshot and returns canonical text from
-PostgreSQL. Chroma can be deleted and rebuilt with:
+ChromaDB stores search copies, not official rules. Python uses each search result to read
+the official text from PostgreSQL before showing it to the model.
 
-```bash
-cd server
-.venv/bin/python -m app.scripts.reindex
-```
+ChromaDB does not:
 
-Semantic search supports investigation. It does not narrow the required full-policy check
-or produce the final verdict.
+- Choose the complete rule list
+- Decide whether a post passes
+- Replace PostgreSQL
+- Publish anything
 
-The exact classifier cache is stored in PostgreSQL. Its key includes the posting text,
-policy snapshot, applicable policy IDs, model, prompt namespace, and checker settings. A
-cache hit still passes through the normal output validation and records an audit step with
-zero model tokens.
+Its data can be rebuilt from PostgreSQL. The setup instructions in the main README show
+the command.
 
-## Completion and publication gates
+## When is an old result reused?
 
-`complete_session` succeeds only when:
+Checking a post with OpenAI costs time and money. PolicyKit can reuse a saved answer only
+when all important inputs are exactly the same:
 
-- All hiring locations resolve to known concrete jurisdictions.
-- The latest posting version has one assessment for every applicable policy.
-- Every assessment is `no_violation`, or a reviewer explicitly resolved it.
-- An agent-authored revision has recruiter approval.
-- The findings belong to the current posting version and pinned snapshot.
+- Job-post text
+- Fixed rule list
+- Required rule versions
+- OpenAI model
+- Model instructions
+- Answer format
 
-Publication runs the same gate again. A stale status or direct API call cannot bypass full
-coverage. Missing or failed work produces a retry, a focused question, a human-review
-request, or a failed session.
+Python checks a reused answer again before saving it to the new review record. The review
+also records that it used the saved result and did not need a new OpenAI call.
 
-## Failure behavior
+## What must be true before a post is ready?
 
-- A malformed or incomplete classifier response is rejected before findings are stored.
-- Evidence text and offsets must match the exact posting substring.
-- The runtime records failed tool calls and includes them in the next agent turn.
-- The agent stops at its configured step limit and sends the session to human review.
-- Interrupted worker sessions return to the queue after the stale threshold.
-- External provider failures return controlled API errors and keep database state durable.
+Python checks all of these conditions:
 
-## Deployment boundary
+- Every location is understood.
+- Every required rule has one result.
+- No open problem or unclear answer remains.
+- A person approved any model-suggested text.
+- The results belong to the current version of the post.
 
-The local application can run its worker inside FastAPI. A deployed system can run the API
-and worker as separate processes against the same PostgreSQL database.
+These checks run once when the model says the work is complete and again when someone
+asks PolicyKit to record the post as published.
 
-The prototype has no external identity provider. Production use requires authenticated
-recruiter, reviewer, and policy-admin roles, tenant isolation, managed secrets, rate limits,
-monitoring, and retention controls.
+## What happens when something fails?
+
+- An incomplete model answer is rejected.
+- A bad text quote is rejected.
+- A failed action is saved so the model can choose a better next step.
+- A review with too many model steps is sent to a person.
+- Work interrupted by a stopped process is returned to the waiting list.
+- A failed OpenAI request returns a clear error and does not erase saved work.
+
+## Running the background reviewer separately
+
+For development, the Python server can also run the background reviewer. In a larger
+setup, they can run as separate programs while both use the same PostgreSQL database.
+The main README contains the command for this setup.
+
+## Limits of the current project
+
+This prototype does not have sign-in or separate customer accounts. Real production use
+also needs secure key storage, access checks, request limits, monitoring, and rules for
+deleting old data.
+
+The included rules are examples. They are not legal advice.
