@@ -8,6 +8,10 @@ PolicyKit has two connected jobs:
 2. Check the saved posting against company policies and local requirements before
    publication.
 
+The local requirements in PolicyKit are rules that a policy manager has entered,
+reviewed, and published. The app does not search the internet for new laws. A qualified
+person must keep the policy library current.
+
 The recruiter controls when models are used. Creating a workspace, typing, saving,
 viewing history, and discarding a suggestion do not call OpenAI. Optional writing help
 and **Check latest draft** do.
@@ -21,8 +25,8 @@ and **Check latest draft** do.
 - A **session** is the workspace that holds the current posting version, compliance work,
   and human decisions.
 - A **policy** is one rule for job postings.
-- A **policy snapshot** is the fixed set of policy versions used after a session starts
-  its first compliance run.
+- A **fixed policy set** is a saved copy of the exact rule versions used after a posting
+  starts its first compliance check. The code calls it a policy snapshot.
 - A **finding** is one policy result and its supporting evidence.
 - The **router** is the model that chooses the agent's next allowed action.
 - The **checker** is the model that assesses every policy supplied by Python.
@@ -43,8 +47,8 @@ flowchart LR
     worker <--> router["OpenAI router model"]
     worker --> checker["OpenAI checker model"]
     worker -.->|"supporting search"| chroma[("ChromaDB")]
-    postgres --> indexer["Index policies and reviewed precedents"]
-    indexer --> textNumbers["OpenAI turns text into numbers"]
+    postgres --> indexer["Prepare policies and past decisions for search"]
+    indexer --> textNumbers["OpenAI prepares meaning-based search data"]
     textNumbers --> chroma
 ```
 
@@ -126,9 +130,9 @@ empty suggestion as a useful change.
 The recruiter saves the draft and selects **Check latest draft**. This is the explicit
 action that starts the full agent.
 
-On the first run, Python pins the latest published policy snapshot to the session. Later
-runs in the same session keep that snapshot. This prevents a policy change from altering
-the meaning of work already in progress.
+On the first run, Python saves the latest published rules as a fixed set for that posting.
+Later runs keep the same set. This prevents a rule change from altering work already in
+progress.
 
 The session enters a waiting list. A background worker takes it and gives the router:
 
@@ -145,7 +149,7 @@ can offer different tools as the state changes.
 ### 6. Check every applicable policy
 
 The router cannot choose which required policies to skip. Python resolves the hiring
-locations and selects every applicable policy version from the pinned snapshot. It then
+locations and selects every applicable rule from the posting's fixed policy set. It then
 sends the checker:
 
 - The full saved posting text.
@@ -218,7 +222,7 @@ prototype changes only the PolicyKit record; it does not contact a job board.
 PostgreSQL is the official record for:
 
 - Policies and all policy versions.
-- Policy snapshots.
+- Fixed policy sets used for past and current reviews.
 - Posting metadata and all saved posting versions.
 - The current posting-version pointer.
 - Agent steps, tool requests, durations, and token counts for router and checker calls.
@@ -243,7 +247,7 @@ excerpts. OpenAI turns the text into numbers that can be compared by meaning.
 For example, “age preference” can find a policy that mentions “recent graduates.”
 
 Python uses a search result only to find an identifier. It reads the official record from
-PostgreSQL and ignores results outside the session's pinned policy snapshot. ChromaDB is
+PostgreSQL and ignores results outside the posting's fixed policy set. ChromaDB is
 not required for typing, saving, selecting applicable policies, checking complete policy
 coverage, or publishing. Its data can be rebuilt from PostgreSQL.
 
@@ -253,7 +257,7 @@ A compliance check uses OpenAI and can cost money. PolicyKit can reuse a saved c
 result only when these inputs match exactly:
 
 - Posting text.
-- Policy snapshot.
+- Fixed policy set.
 - Applicable policy-version identifiers.
 - Checker model.
 - Checker reasoning setting.
@@ -313,7 +317,9 @@ Both processes use the same PostgreSQL database.
 
 ## Prototype limits
 
-PolicyKit is a demonstration, not legal advice. It has no sign-in, access roles,
-customer-account separation, rate limits, production secret management, external job
-board integration, monitoring, or data-retention controls. A qualified person must review
-real policies and publication decisions.
+PolicyKit is a demonstration, not legal advice. It checks only the rules entered and
+published by a policy manager; it does not find new laws or confirm that the policy
+library is complete. It also has no sign-in, access roles, customer-account separation,
+rate limits, production secret management, external job board integration, monitoring,
+or data-retention controls. A qualified person must review real policies and publication
+decisions.

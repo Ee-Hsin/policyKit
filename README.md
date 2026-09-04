@@ -1,7 +1,8 @@
 # PolicyKit
 
-PolicyKit helps recruiters create and improve job postings, then checks them against
-company policies and local requirements before publication.
+PolicyKit helps recruiters write, edit, and check job postings before they go live. It
+compares each saved posting with company rules and location-specific requirements that a
+policy manager has approved.
 
 A recruiter can start with short role ideas or paste an existing posting. The posting
 opens as an editable draft. Writing help is optional, and a compliance run starts only
@@ -11,9 +12,22 @@ publication decision.
 In this prototype, “publish” means that PolicyKit records the posting as approved inside
 PolicyKit. It does not send the posting to LinkedIn, Indeed, or another job site.
 
-![Start a job posting from ideas or existing text](docs/images/policykit-home.png)
+PolicyKit does not search the internet for new laws. A policy manager must enter, review,
+and publish each company rule or local requirement first. This makes the source of every
+check clear, but a qualified person must keep those rules current.
 
-![Review an exact compliance edit before accepting it](docs/images/policykit-review.png)
+![Create a job posting from role notes or existing text](docs/images/policykit-home.png)
+
+![Edit a posting and see its completed policy review](docs/images/policykit-review.png)
+
+## Why a business would use it
+
+- Recruiters can find policy problems before a posting reaches a job board.
+- Company and location rules are applied in the same way across postings.
+- Recruiters can improve the text without giving up control of the draft.
+- Policy reviewers can focus on unclear cases instead of checking every line by hand.
+- The company keeps a record of the posting, the rules checked, the results, and each
+  human decision.
 
 ## The main ideas
 
@@ -21,9 +35,10 @@ PolicyKit. It does not send the posting to LinkedIn, Indeed, or another job site
 - A **saved version** is a copy of the draft at one point in time. Saved versions do not
   change. A later save creates another version, so people can see and restore earlier text.
 - A **policy** is a company rule or local requirement for a job posting.
-- A **policy snapshot** is the fixed set of policy versions used by one compliance run.
-- An **agent** is the Python-controlled review process. Its router model chooses from
-  actions allowed by the Python server.
+- A **fixed policy set** is a saved copy of the exact rules used for one review. The code
+  calls this a policy snapshot.
+- The **review agent** is the Python-controlled review process. A model chooses its next
+  action from a short list allowed by the Python server.
 - A **finding** is the result for one policy, with the reason and exact evidence when the
   posting has a problem.
 
@@ -43,8 +58,8 @@ PolicyKit. It does not send the posting to LinkedIn, Indeed, or another job site
    cannot make a newer version ready.
 9. If a policy reviewer rejects the posting, edit and save a new version before checking
    again.
-10. Record the posting as published only after the current version passes every
-   publication rule.
+10. Record the posting as published only after the current version passes all required
+    checks and approvals.
 
 ```mermaid
 flowchart TD
@@ -62,23 +77,23 @@ flowchart TD
     agent --> result["Findings and proposed compliance edits"]
     result -->|"Posting changes"| stale["Old check becomes stale"]
     stale --> draft
-    result -->|"Current check has no open findings"| ready["Ready for internal publication"]
+    result -->|"All required checks and approvals pass"| ready["Ready for internal publication"]
 ```
 
 ## What happens during Check latest draft?
 
 **Check latest draft** is one explicit request to start the full agent. The run can use:
 
-- A **router model** to choose the next allowed action.
-- A **checker model** to compare the complete saved posting with every applicable policy.
+- A **router model** that chooses the next allowed action.
+- A **checker model** that compares the complete saved posting with every required rule.
 - **Policy search** to find useful policy passages.
 - **Reviewed-precedent search** to find related past human decisions.
 - A **proposed compliance edit** when a small text change can address a finding.
 
 The agent can take more than one step, so one run can make more than one OpenAI request.
-The Python server supplies the allowed actions and the complete required policy list. It
-also rejects incomplete policy results, bad evidence locations, unsupported edits, and
-attempts to publish before the current version is ready.
+The Python server supplies the allowed actions and the complete list of rules that must
+be checked. It rejects missing results, quotes that do not match the posting, unsupported
+edits, and attempts to publish before the current version is ready.
 
 When the agent proposes text, it creates a preview for the recruiter. The agent cannot
 approve its own text. If the recruiter accepts a proposed compliance edit, PolicyKit
@@ -127,8 +142,8 @@ flowchart LR
     worker <--> router["OpenAI router model"]
     worker --> checker["OpenAI checker model"]
     worker -.->|"supporting search"| chroma[("ChromaDB")]
-    postgres --> reindex["Policy and precedent indexing"]
-    reindex --> textNumbers["OpenAI turns text into numbers"]
+    postgres --> reindex["Prepare policies and past decisions for search"]
+    reindex --> textNumbers["OpenAI prepares meaning-based search data"]
     textNumbers --> chroma
 ```
 
@@ -138,8 +153,8 @@ flowchart LR
 | --- | --- |
 | Python | Selects applicable policies, runs allowed agent tools, validates model output, and enforces publication rules |
 | FastAPI | Provides the web API and live session updates |
-| PostgreSQL | Stores the official policies, policy snapshots, saved posting versions, findings, changes, human decisions, and audit activity |
-| OpenAI | Generates optional writing help, routes agent steps, checks policies, and turns text into numbers that Chroma can compare by meaning |
+| PostgreSQL | Stores the official policies, fixed policy sets, saved posting versions, findings, changes, human decisions, and activity history |
+| OpenAI | Generates optional writing help, chooses agent steps, checks policies, and prepares text for meaning-based search |
 | ChromaDB | Finds related policy text and reviewed precedents by meaning |
 | Next.js | Provides the recruiter editor and policy-management website |
 
@@ -171,10 +186,10 @@ These actions can call OpenAI and use API credit:
 - Testing or publishing a policy, rebuilding Chroma data, and running live model
   evaluations can also call OpenAI.
 
-PolicyKit can reuse an exact saved compliance result when the posting, policy snapshot,
+PolicyKit can reuse an exact saved compliance result when the posting, fixed policy set,
 policy versions, checker model, and checker instructions are unchanged. A changed posting
-requires a new result. The agent has a maximum step count, model output limits, request
-timeouts, and limited provider retries, but this prototype has no user rate limit or
+requires a new result. The agent has a maximum number of steps, model output limits,
+request timeouts, and limited retries, but this prototype has no user rate limit or
 spending budget.
 
 Saved drafts, versions, findings, approvals, reviewer decisions, and agent activity are
@@ -199,10 +214,10 @@ Each policy contains where it applies, its rule text, reason, recommended fix, e
 exceptions. A published policy version cannot change. The manager creates a new version
 instead.
 
-PolicyKit pins the latest published policy snapshot when the recruiter first selects
-**Check latest draft**. Later runs in the same session keep that snapshot, even if a
-manager publishes a newer policy version. This keeps repeated checks consistent. A new
-session uses the latest policy set when its first check starts.
+PolicyKit saves a fixed copy of the latest published rules when the recruiter first
+selects **Check latest draft**. Later checks of the same posting keep that fixed set, even
+if a manager publishes a newer rule. This keeps repeated checks consistent. A new posting
+uses the latest rules when its first check starts.
 
 ## Run PolicyKit locally
 
@@ -321,7 +336,7 @@ npm run build
 npm audit --audit-level=high
 ```
 
-Live classifier evaluations call OpenAI and use API credit. Start with a small set:
+Live checker tests call OpenAI and use API credit. Start with a small set:
 
 ```bash
 cd server
@@ -348,6 +363,8 @@ Read [the architecture guide](docs/architecture.md) and
 ## Prototype limits
 
 This project is a working prototype, not legal advice or a production compliance system.
+It checks only the rules that a policy manager has entered and published. It does not
+confirm that those rules cover every current law.
 It does not have:
 
 - Sign-in or role-based access.

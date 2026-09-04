@@ -11,7 +11,8 @@ the tests fast, repeatable, and free.
 
 The tests cover:
 
-- Starting a session as an editable draft without a policy snapshot or background work.
+- Starting a posting as an editable draft without fixing its policy set or starting
+  background work.
 - Generating a writing preview without saving a job posting.
 - Saving direct recruiter edits as new versions that cannot later change.
 - Rejecting an unchanged save or a save based on an older version.
@@ -20,7 +21,7 @@ The tests cover:
 - Limiting selected writing help to the selection and nearby context.
 - Rechecking the saved base version after a writing-model request finishes.
 - Starting the full agent only after an explicit compliance request.
-- Pinning the policy snapshot and policy evaluation time at the first explicit check.
+- Saving a fixed policy set and review time at the first explicit check.
 - Reporting whether a check is never run, running, current, or stale.
 - Keeping old-version findings from approving a newer posting version.
 - Preventing an old browser action from publishing or resuming work for a newer version.
@@ -35,7 +36,7 @@ The tests cover:
 - Requiring a person to approve model-proposed compliance text.
 - Blocking publication until the current version passes every publication rule.
 - Recovering interrupted background work.
-- Keeping published policy versions and old policy snapshots unchanged.
+- Keeping published policy versions and old fixed policy sets unchanged.
 
 Run the backend tests:
 
@@ -77,8 +78,8 @@ include:
 - Several problems in one posting.
 - Text inside a posting that tries to instruct the model.
 
-The local fixture check validates the example structure and policy keys without calling
-OpenAI:
+The local example-data check validates the example structure and policy names without
+calling OpenAI:
 
 ```bash
 cd server
@@ -140,7 +141,7 @@ that the earlier version found.
 
 ## What the live checker evaluation does not test
 
-The current live suite evaluates the compliance checker. It does not evaluate:
+The current live tests evaluate the compliance checker. They do not evaluate:
 
 - Initial draft quality.
 - Writing-suggestion quality.
