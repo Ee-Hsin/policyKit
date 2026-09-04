@@ -1,8 +1,9 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { CollaborativePostingEditor } from "@/components/CollaborativePostingEditor";
 import {
   API_BASE_URL,
   ApiError,
@@ -10,9 +11,10 @@ import {
   approveRevision,
   getSession,
   publishSession,
+  resolveHumanReview,
 } from "@/lib/api";
 import { formatDate, formatDuration, labelize } from "@/lib/format";
-import type { ComplianceSession, Finding, SessionStatus } from "@/lib/types";
+import type { ComplianceSession, SessionStatus } from "@/lib/types";
 
 const reviewStages = ["Draft", "Investigation", "Approval", "Ready"];
 
@@ -29,39 +31,15 @@ function statusTone(status: SessionStatus) {
   return "active";
 }
 
-function AnnotatedPosting({ content, findings }: { content: string; findings: Finding[] }) {
-  const annotations = findings
-    .filter(
-      (finding) =>
-        finding.status !== "no_violation" &&
-        finding.evidence_start !== null &&
-        finding.evidence_end !== null &&
-        finding.evidence_start >= 0 &&
-        finding.evidence_end <= content.length &&
-        finding.evidence_end > finding.evidence_start,
-    )
-    .sort((a, b) => (a.evidence_start ?? 0) - (b.evidence_start ?? 0));
-
-  const nodes: ReactNode[] = [];
-  let cursor = 0;
-  annotations.forEach((finding) => {
-    const start = finding.evidence_start ?? 0;
-    const end = finding.evidence_end ?? 0;
-    if (start < cursor) return;
-    nodes.push(content.slice(cursor, start));
-    nodes.push(
-      <mark className={`posting-mark posting-mark--${finding.status}`} key={finding.id} title={finding.policy_title}>
-        {content.slice(start, end)}
-      </mark>,
-    );
-    cursor = end;
-  });
-  nodes.push(content.slice(cursor));
-
-  return <div className="posting-content">{nodes}</div>;
-}
-
-function AgentPanel({ session, onUpdate }: { session: ComplianceSession; onUpdate: (next: ComplianceSession) => void }) {
+function AgentPanel({
+  session,
+  onUpdate,
+  hasUnsavedDraft,
+}: {
+  session: ComplianceSession;
+  onUpdate: (next: ComplianceSession) => void;
+  hasUnsavedDraft: boolean;
+}) {
   const [message, setMessage] = useState("");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
@@ -83,7 +61,15 @@ function AgentPanel({ session, onUpdate }: { session: ComplianceSession; onUpdat
 
   function submitAnswer(event: FormEvent) {
     event.preventDefault();
-    void run(() => answerSession(session.id, message));
+    void run(() => answerSession(session.id, session.current_posting_version.id, message));
+  }
+
+  function resolveReview(decision: "approve" | "reject" | "request_changes") {
+    void run(() => resolveHumanReview(session.id, {
+      reviewer_name: "Demo policy reviewer",
+      decision,
+      notes: notes || undefined,
+    }));
   }
 
   const activeChanges = session.proposed_changes.filter((change) => change.status === "proposed");
@@ -118,7 +104,7 @@ function AgentPanel({ session, onUpdate }: { session: ComplianceSession; onUpdat
                 placeholder="Give the agent the missing detail…"
               />
             </label>
-            <button className="button button--primary button--full" disabled={busy}>
+            <button className="button button--primary button--full" disabled={busy || hasUnsavedDraft}>
               {busy ? "Sending…" : "Send and continue"}
             </button>
           </form>
@@ -146,10 +132,10 @@ function AgentPanel({ session, onUpdate }: { session: ComplianceSession; onUpdat
             <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Add context for the agent…" />
           </label>
           <div className="button-row">
-            <button className="button button--primary" disabled={busy} onClick={() => void run(() => approveRevision(session.id, true, notes))}>
+            <button className="button button--primary" disabled={busy || hasUnsavedDraft} onClick={() => void run(() => approveRevision(session.id, session.current_posting_version.id, true, notes))}>
               Approve changes
             </button>
-            <button className="button button--secondary" disabled={busy} onClick={() => void run(() => approveRevision(session.id, false, notes))}>
+            <button className="button button--secondary" disabled={busy || hasUnsavedDraft} onClick={() => void run(() => approveRevision(session.id, session.current_posting_version.id, false, notes))}>
               Request revision
             </button>
           </div>
@@ -162,7 +148,7 @@ function AgentPanel({ session, onUpdate }: { session: ComplianceSession; onUpdat
           <p className="kicker">All checks complete</p>
           <h3>This posting is ready to publish.</h3>
           <p>Every applicable policy was checked, and no unresolved findings remain.</p>
-          <button className="button button--primary button--full" disabled={busy} onClick={() => void run(() => publishSession(session.id))}>
+          <button className="button button--primary button--full" disabled={busy || hasUnsavedDraft} onClick={() => void run(() => publishSession(session.id, session.current_posting_version.id))}>
             {busy ? "Publishing…" : "Publish posting"}
           </button>
         </div>
@@ -172,17 +158,47 @@ function AgentPanel({ session, onUpdate }: { session: ComplianceSession; onUpdat
         <div className="agent-callout agent-callout--success">
           <span className="success-icon" aria-hidden="true">✓</span>
           <p className="kicker">Published</p>
-          <h3>The approved posting is live.</h3>
+          <h3>Publication is recorded in PolicyKit.</h3>
           <p>PolicyKit saved the policy snapshot, review activity, and final posting version.</p>
           <Link className="button button--secondary button--full" href="/">Review another posting</Link>
         </div>
       ) : null}
 
-      {session.status === "needs_review" || session.status === "failed" ? (
+      {session.status === "needs_review" ? (
         <div className="agent-callout agent-callout--warning">
-          <p className="kicker">{session.status === "failed" ? "Review stopped" : "Human review required"}</p>
+          <p className="kicker">Human review required</p>
           <h3>{session.error_message ?? "The agent could not reach a safe decision."}</h3>
-          <p>No posting was published. A reviewer can inspect the evidence and decide what happens next.</p>
+          <p>Inspect the evidence, add a note if needed, and record a decision.</p>
+          <label className="field">
+            <span>Reviewer note <em>Optional for approval</em></span>
+            <textarea
+              maxLength={3000}
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Explain the decision or what must change."
+            />
+          </label>
+          <div className="review-decision-grid">
+            <button className="button button--primary" disabled={busy || hasUnsavedDraft} onClick={() => resolveReview("approve")}>Approve</button>
+            <button className="button button--secondary" disabled={busy || hasUnsavedDraft || !notes.trim()} onClick={() => resolveReview("request_changes")}>Request changes</button>
+            <button className="button button--secondary" disabled={busy || hasUnsavedDraft || !notes.trim()} onClick={() => resolveReview("reject")}>Reject</button>
+          </div>
+        </div>
+      ) : null}
+
+      {session.status === "failed" ? (
+        <div className="agent-callout agent-callout--warning">
+          <p className="kicker">Review stopped</p>
+          <h3>{session.error_message ?? "The compliance check could not finish."}</h3>
+          <p>Your draft is safe. Retry the same version, or edit it before trying again.</p>
+        </div>
+      ) : null}
+
+      {session.status === "draft" ? (
+        <div className="agent-callout">
+          <p className="kicker">Draft workspace</p>
+          <h3>Shape the posting before checking it.</h3>
+          <p>Save your edits, then use Check latest draft when you want the agent to review the full policy set.</p>
         </div>
       ) : null}
 
@@ -197,6 +213,10 @@ function AgentPanel({ session, onUpdate }: { session: ComplianceSession; onUpdat
       ) : null}
 
       {error ? <div className="alert alert--error" role="alert">{error}</div> : null}
+
+      {hasUnsavedDraft ? (
+        <div className="agent-unsaved-note">Save or discard your posting edits before taking an agent action.</div>
+      ) : null}
 
       <div className="activity">
         <div className="activity__heading">
@@ -234,30 +254,39 @@ export default function SessionPage() {
   const [session, setSession] = useState<ComplianceSession | null>(null);
   const [error, setError] = useState("");
   const [connected, setConnected] = useState(false);
+  const [editorDirty, setEditorDirty] = useState(false);
 
   useEffect(() => {
     let active = true;
-    void getSession(id)
-      .then((result) => active && setSession(result))
-      .catch((cause) => active && setError(cause instanceof ApiError ? cause.message : "Could not load the compliance review."));
+    let source: EventSource | null = null;
 
-    const source = new EventSource(`${API_BASE_URL}/compliance-sessions/${id}/events`);
-    source.addEventListener("session", (event) => {
-      if (!active) return;
-      const next = JSON.parse((event as MessageEvent<string>).data) as ComplianceSession;
-      setSession(next);
-      setConnected(true);
-      setError("");
-      if (next.status === "published" || next.status === "failed") {
-        source.close();
-      }
-    });
-    source.onopen = () => setConnected(true);
-    source.onerror = () => setConnected(false);
+    function startEventStream() {
+      source = new EventSource(`${API_BASE_URL}/compliance-sessions/${id}/events`);
+      source.addEventListener("session", (event) => {
+        if (!active) return;
+        const next = JSON.parse((event as MessageEvent<string>).data) as ComplianceSession;
+        setSession(next);
+        setConnected(true);
+        setError("");
+        if (next.status === "published") {
+          source?.close();
+        }
+      });
+      source.onopen = () => active && setConnected(true);
+      source.onerror = () => active && setConnected(false);
+    }
+
+    void getSession(id)
+      .then((result) => {
+        if (!active) return;
+        setSession(result);
+        startEventStream();
+      })
+      .catch((cause) => active && setError(cause instanceof ApiError ? cause.message : "Could not load the compliance review."));
 
     return () => {
       active = false;
-      source.close();
+      source?.close();
     };
   }, [id]);
 
@@ -296,7 +325,7 @@ export default function SessionPage() {
 
   const activeStage = stageForStatus(session.status);
   const activeFindings = sortedFindings.filter((finding) => finding.status !== "no_violation");
-  const terminal = session.status === "published" || session.status === "failed";
+  const terminal = session.status === "published";
 
   return (
     <div className="workspace-shell">
@@ -330,25 +359,9 @@ export default function SessionPage() {
       </ol>
 
       <div className="workspace-grid">
-        <section className="posting-panel">
-          <div className="panel-heading">
-            <div>
-              <p className="kicker">Current posting</p>
-              <h2>{session.title}</h2>
-            </div>
-            <div className="version-chip">
-              Version {session.current_posting_version.version}
-              {session.current_posting_version.source === "agent" ? " · Agent draft" : " · Original"}
-            </div>
-          </div>
-          <div className="posting-meta">
-            <span>{labelize(session.employment_type)}</span>
-            {session.target_locations.map((location) => <span key={location}>{location}</span>)}
-          </div>
-          <AnnotatedPosting content={session.current_posting_version.content} findings={session.findings} />
-        </section>
+        <CollaborativePostingEditor session={session} onUpdate={setSession} onDirtyChange={setEditorDirty} />
 
-        <AgentPanel session={session} onUpdate={setSession} />
+        <AgentPanel session={session} onUpdate={setSession} hasUnsavedDraft={editorDirty} />
       </div>
 
       <section className="findings-section">
@@ -381,8 +394,14 @@ export default function SessionPage() {
           </div>
         ) : (
           <div className="empty-state">
-            <span className="spinner spinner--small" />
-            <p>Policy assessments will appear after the agent runs the full compliance check.</p>
+            {(["queued", "investigating"] as SessionStatus[]).includes(session.status) ? <span className="spinner spinner--small" /> : null}
+            <p>
+              {session.check_state === "stale"
+                ? "The saved draft changed after the last check. Run compliance again to see current results."
+                : session.check_state === "running"
+                  ? "The agent is checking the saved draft. Results will appear here."
+                  : "Policy assessments will appear after you run the full compliance check."}
+            </p>
           </div>
         )}
       </section>

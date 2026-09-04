@@ -6,7 +6,7 @@ import "./taste.css";
 
 export const metadata: Metadata = {
   title: "PolicyKit",
-  description: "Pre-publication job-posting compliance",
+  description: "AI-assisted job-posting editor and pre-publication compliance",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -26,13 +26,12 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               <span>PolicyKit</span>
             </Link>
             <nav className="site-nav" aria-label="Primary navigation">
-              <Link href="/">Review a post</Link>
               <Link href="/admin/policies">Policy library</Link>
             </nav>
-            <a className="header-action" href="/#review">
-              Start review
+            <Link className="header-action" href="/">
+              New posting
               <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M4 10h12m-5-5 5 5-5 5" /></svg>
-            </a>
+            </Link>
           </div>
         </header>
         <main className="app-main" id="main-content"><MotionProvider>{children}</MotionProvider></main>
