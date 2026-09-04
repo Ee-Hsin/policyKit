@@ -51,6 +51,7 @@ class ComplianceSessionStatus(enum.StrEnum):
     READY_TO_PUBLISH = "ready_to_publish"
     NEEDS_REVIEW = "needs_review"
     PUBLISHED = "published"
+    REJECTED = "rejected"
     FAILED = "failed"
 
 

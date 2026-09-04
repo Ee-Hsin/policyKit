@@ -1,4 +1,4 @@
-"""Rebuild Chroma indexes from the current PostgreSQL source of truth."""
+"""Rebuild Chroma search data from the current PostgreSQL records."""
 
 import asyncio
 

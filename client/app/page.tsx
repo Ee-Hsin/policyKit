@@ -131,6 +131,7 @@ export default function NewPostingPage() {
           <button
             className={mode === "ideas" ? "start-method start-method--active" : "start-method"}
             type="button"
+            disabled={busy !== null}
             aria-pressed={mode === "ideas"}
             onClick={() => chooseMode("ideas")}
           >
@@ -140,6 +141,7 @@ export default function NewPostingPage() {
           <button
             className={mode === "paste" ? "start-method start-method--active" : "start-method"}
             type="button"
+            disabled={busy !== null}
             aria-pressed={mode === "paste"}
             onClick={() => chooseMode("paste")}
           >
@@ -154,6 +156,7 @@ export default function NewPostingPage() {
               <span>Job title</span>
               <input
                 required
+                disabled={busy !== null}
                 minLength={2}
                 maxLength={240}
                 value={title}
@@ -165,6 +168,7 @@ export default function NewPostingPage() {
               <span>Organization <em>Optional</em></span>
               <input
                 maxLength={240}
+                disabled={busy !== null}
                 value={organization}
                 onChange={(event) => setOrganization(event.target.value)}
                 placeholder="Acme, Inc."
@@ -173,6 +177,7 @@ export default function NewPostingPage() {
             <label className="field">
               <span>Hiring locations <em>Optional</em></span>
               <input
+                disabled={busy !== null}
                 value={locations}
                 onChange={(event) => setLocations(event.target.value)}
                 placeholder="New York, California"
@@ -182,7 +187,7 @@ export default function NewPostingPage() {
             </label>
             <label className="field">
               <span>Employment type</span>
-              <select value={employmentType} onChange={(event) => setEmploymentType(event.target.value)}>
+              <select disabled={busy !== null} value={employmentType} onChange={(event) => setEmploymentType(event.target.value)}>
                 <option value="full_time">Full-time</option>
                 <option value="part_time">Part-time</option>
                 <option value="contract">Contract</option>
@@ -197,6 +202,7 @@ export default function NewPostingPage() {
               <span>What should this person do?</span>
               <textarea
                 required
+                disabled={busy !== null}
                 minLength={10}
                 maxLength={5000}
                 value={roleIdeas}
@@ -214,6 +220,7 @@ export default function NewPostingPage() {
                 required
                 minLength={30}
                 maxLength={100000}
+                readOnly={busy !== null}
                 value={content}
                 onChange={(event) => setContent(event.target.value)}
                 placeholder="Paste the full job posting here."

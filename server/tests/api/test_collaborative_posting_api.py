@@ -261,6 +261,36 @@ async def test_writing_suggestion_rechecks_the_base_after_the_model_call(
     assert len(fake.suggestion_calls) == 1
 
 
+async def test_writing_suggestion_rejects_unchanged_model_text(
+    api_client: httpx.AsyncClient,
+    monkeypatch,
+) -> None:
+    created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
+    payload = created.json()
+    draft_text = payload["current_posting_version"]["content"]
+    fake = FakeWritingGateway(
+        suggestion=WritingSuggestionOutput(
+            suggested_text=draft_text,
+            summary="No useful change.",
+        )
+    )
+    monkeypatch.setattr(session_endpoints, "OpenAIGateway", lambda _settings: fake)
+
+    response = await api_client.post(
+        f"/api/v1/compliance-sessions/{payload['id']}/writing-suggestions",
+        json={
+            "base_version_id": payload["current_posting_version"]["id"],
+            "draft_text": draft_text,
+            "instruction": "Make a focused improvement.",
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == (
+        "The writing assistant did not change the draft. Try a more specific request."
+    )
+
+
 async def test_check_is_explicit_and_keeps_the_first_pinned_snapshot(
     api_client: httpx.AsyncClient,
     db: AsyncSession,

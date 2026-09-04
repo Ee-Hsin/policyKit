@@ -53,7 +53,7 @@ async def resolve_review(
             .where(
                 ComplianceFinding.id == request.finding_id,
                 ComplianceFinding.session_id == session_id,
-                ComplianceFinding.posting_version_id == session.current_posting_version_id,
+                ComplianceFinding.posting_version_id == request.base_version_id,
             )
             .options(
                 selectinload(ComplianceFinding.policy_version).selectinload(PolicyVersion.policy)
@@ -72,6 +72,7 @@ async def resolve_review(
         review = await repository.add_human_review(
             db,
             session,
+            base_version_id=request.base_version_id,
             reviewer_name=request.reviewer_name,
             decision=request.decision,
             notes=request.notes,

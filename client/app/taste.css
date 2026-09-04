@@ -1924,6 +1924,11 @@ body {
   background: #fffef9;
 }
 
+.start-method:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
 .start-method--active {
   background: var(--ink);
   color: white;
@@ -2158,7 +2163,7 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
   line-height: 1.8;
-  min-height: 520px;
+  min-height: 400px;
   padding: 20px;
   resize: vertical;
   width: 100%;
@@ -2183,14 +2188,14 @@ body {
 }
 
 .editor-evidence {
-  min-height: 570px;
+  min-height: 450px;
 }
 
 .editor-evidence__content {
   background: var(--surface-strong);
   border: 1px solid var(--line);
   border-radius: 13px;
-  min-height: 520px;
+  min-height: 400px;
   padding: 20px;
 }
 
@@ -2414,8 +2419,19 @@ body {
 
   .editor-textarea textarea {
     font-size: 16px;
-    min-height: 470px;
+    min-height: 390px;
     padding: 15px;
+  }
+
+  .start-form__draft textarea,
+  .history-control select {
+    font-size: 16px;
+  }
+
+  .history-control select,
+  .button--compact,
+  .mode-switch button {
+    min-height: 44px;
   }
 
   .writing-assistant__heading,
@@ -2429,6 +2445,7 @@ body {
   }
 
   .editor-actions {
-    bottom: max(8px, env(safe-area-inset-bottom));
+    bottom: auto;
+    position: static;
   }
 }

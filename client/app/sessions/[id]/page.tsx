@@ -19,14 +19,14 @@ import type { ComplianceSession, SessionStatus } from "@/lib/types";
 const reviewStages = ["Draft", "Investigation", "Approval", "Ready"];
 
 function stageForStatus(status: SessionStatus) {
-  if (["draft", "queued", "investigating", "waiting_for_information", "needs_review", "failed"].includes(status)) return status === "draft" ? 0 : 1;
+  if (["draft", "queued", "investigating", "waiting_for_information", "needs_review", "rejected", "failed"].includes(status)) return status === "draft" ? 0 : 1;
   if (["changes_proposed", "waiting_for_approval"].includes(status)) return 2;
   return 3;
 }
 
 function statusTone(status: SessionStatus) {
   if (status === "ready_to_publish" || status === "published") return "success";
-  if (status === "failed") return "danger";
+  if (status === "failed" || status === "rejected") return "danger";
   if (status === "waiting_for_information" || status === "waiting_for_approval" || status === "needs_review") return "warning";
   return "active";
 }
@@ -66,6 +66,7 @@ function AgentPanel({
 
   function resolveReview(decision: "approve" | "reject" | "request_changes") {
     void run(() => resolveHumanReview(session.id, {
+      base_version_id: session.current_posting_version.id,
       reviewer_name: "Demo policy reviewer",
       decision,
       notes: notes || undefined,
@@ -81,7 +82,7 @@ function AgentPanel({
         <div className="agent-avatar" aria-hidden="true">P</div>
         <div>
           <p className="kicker">Compliance agent</p>
-          <h2>{session.status === "published" ? "Review complete" : "Working toward approval"}</h2>
+          <h2>{session.status === "published" ? "Review complete" : "Draft and compliance help"}</h2>
         </div>
         {(["queued", "investigating"] as SessionStatus[]).includes(session.status) ? (
           <span className="live-indicator"><i /> Live</span>
@@ -194,6 +195,14 @@ function AgentPanel({
         </div>
       ) : null}
 
+      {session.status === "rejected" ? (
+        <div className="agent-callout agent-callout--warning">
+          <p className="kicker">Posting rejected</p>
+          <h3>{session.error_message ?? "A policy reviewer rejected this posting."}</h3>
+          <p>Edit and save a new version before starting another compliance check.</p>
+        </div>
+      ) : null}
+
       {session.status === "draft" ? (
         <div className="agent-callout">
           <p className="kicker">Draft workspace</p>
@@ -241,7 +250,7 @@ function AgentPanel({
             ))}
           </ol>
         ) : (
-          <p className="empty-copy">The first activity will appear when the agent begins.</p>
+          <p className="empty-copy">Draft and compliance activity will appear here.</p>
         )}
       </div>
     </aside>

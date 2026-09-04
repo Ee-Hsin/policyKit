@@ -203,6 +203,11 @@ async def suggest_writing(
     if not 30 <= len(suggested_text) <= 100_000:
         logger.error("Writing suggestion returned an invalid posting length")
         raise HTTPException(status_code=502, detail="Writing assistance could not complete")
+    if suggested_text == request.draft_text:
+        raise HTTPException(
+            status_code=502,
+            detail="The writing assistant did not change the draft. Try a more specific request.",
+        )
     return WritingSuggestionRead(
         base_version_id=request.base_version_id,
         suggested_text=suggested_text,

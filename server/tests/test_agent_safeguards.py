@@ -414,6 +414,7 @@ async def test_human_approval_records_and_resolves_reviewed_findings(
     review = await session_repository.add_human_review(
         db,
         session,
+        base_version_id=session.current_posting_version_id,
         reviewer_name="Policy reviewer",
         decision="approve",
         notes="Approved as an explicit policy exception.",
@@ -449,6 +450,7 @@ async def test_human_review_rechecks_status_inside_the_write_transaction(
         await session_repository.add_human_review(
             db,
             session,
+            base_version_id=session.current_posting_version_id,
             reviewer_name="Stale reviewer",
             decision="approve",
             notes=None,

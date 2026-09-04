@@ -164,6 +164,7 @@ class SessionListItem(BaseModel):
 
 
 class HumanReviewCreate(BaseModel):
+    base_version_id: str
     reviewer_name: str = Field(min_length=2, max_length=160)
     decision: str = Field(pattern=r"^(approve|reject|request_changes)$")
     notes: str | None = Field(default=None, max_length=3_000)

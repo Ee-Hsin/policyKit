@@ -343,6 +343,7 @@ async def test_reviewer_cannot_approve_an_unchecked_escalated_session(
     reviewed = await api_client.post(
         f"/api/v1/reviews/{session_id}",
         json={
+            "base_version_id": session.current_posting_version_id,
             "reviewer_name": "Policy reviewer",
             "decision": "approve",
             "notes": "Reviewed against the source policy.",
@@ -400,6 +401,7 @@ async def test_reviewer_cannot_promote_evidence_from_an_older_posting_version(
     response = await api_client.post(
         f"/api/v1/reviews/{session.id}",
         json={
+            "base_version_id": session.current_posting_version_id,
             "reviewer_name": "Policy reviewer",
             "decision": "reject",
             "promote_to_precedent": True,
@@ -409,3 +411,67 @@ async def test_reviewer_cannot_promote_evidence_from_an_older_posting_version(
 
     assert response.status_code == 422
     assert response.json()["detail"] == "Finding is not part of the current posting version"
+
+
+async def test_review_decision_requires_the_current_posting_version(
+    api_client: httpx.AsyncClient,
+    db: AsyncSession,
+) -> None:
+    created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
+    session = await session_repository.get_session(db, created.json()["id"])
+    first_version_id = session.current_posting_version_id
+    second_version = PostingVersion(
+        posting_id=session.posting_id,
+        version=2,
+        content="Build dependable Python services and support our learning platform customers.",
+        source="recruiter",
+    )
+    db.add(second_version)
+    await db.flush()
+    session.current_posting_version_id = second_version.id
+    session.current_posting_version = second_version
+    session.status = ComplianceSessionStatus.NEEDS_REVIEW.value
+    await db.commit()
+
+    stale_review = await api_client.post(
+        f"/api/v1/reviews/{session.id}",
+        json={
+            "base_version_id": first_version_id,
+            "reviewer_name": "Policy reviewer",
+            "decision": "reject",
+            "notes": "This decision belongs to the earlier draft.",
+        },
+    )
+    assert stale_review.status_code == 409
+    assert stale_review.json()["detail"] == "The posting changed after this draft was loaded"
+
+    current_review = await api_client.post(
+        f"/api/v1/reviews/{session.id}",
+        json={
+            "base_version_id": second_version.id,
+            "reviewer_name": "Policy reviewer",
+            "decision": "reject",
+            "notes": "Add the missing employment details before another check.",
+        },
+    )
+    assert current_review.status_code == 200
+    assert current_review.json()["status"] == ComplianceSessionStatus.REJECTED.value
+
+    unchanged_retry = await api_client.post(
+        f"/api/v1/compliance-sessions/{session.id}/check",
+        json={"base_version_id": second_version.id},
+    )
+    assert unchanged_retry.status_code == 409
+
+    edited = await api_client.post(
+        f"/api/v1/compliance-sessions/{session.id}/posting-versions",
+        json={
+            "base_version_id": second_version.id,
+            "content": (
+                "Build dependable Python services, support our learning platform customers, "
+                "and join a full-time New York team."
+            ),
+        },
+    )
+    assert edited.status_code == 201
+    assert edited.json()["status"] == ComplianceSessionStatus.DRAFT.value

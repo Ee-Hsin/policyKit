@@ -8,6 +8,7 @@ export type SessionStatus =
   | "ready_to_publish"
   | "needs_review"
   | "published"
+  | "rejected"
   | "failed";
 
 export interface AgentStep {
@@ -113,6 +114,7 @@ export interface ComplianceSession {
 }
 
 export interface HumanReviewInput {
+  base_version_id: string;
   reviewer_name: string;
   decision: "approve" | "reject" | "request_changes";
   notes?: string;

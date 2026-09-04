@@ -34,6 +34,7 @@ TERMINAL_OR_PAUSED_STATUSES = {
     ComplianceSessionStatus.NEEDS_REVIEW.value,
     ComplianceSessionStatus.READY_TO_PUBLISH.value,
     ComplianceSessionStatus.PUBLISHED.value,
+    ComplianceSessionStatus.REJECTED.value,
     ComplianceSessionStatus.FAILED.value,
 }
 

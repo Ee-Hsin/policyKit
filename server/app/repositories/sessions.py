@@ -38,6 +38,7 @@ EDITABLE_SESSION_STATUSES = {
     ComplianceSessionStatus.WAITING_FOR_APPROVAL.value,
     ComplianceSessionStatus.READY_TO_PUBLISH.value,
     ComplianceSessionStatus.NEEDS_REVIEW.value,
+    ComplianceSessionStatus.REJECTED.value,
     ComplianceSessionStatus.FAILED.value,
 }
 
@@ -515,17 +516,16 @@ async def add_human_review(
     db: AsyncSession,
     session: ComplianceSession,
     *,
+    base_version_id: str,
     reviewer_name: str,
     decision: str,
     notes: str | None,
     precedent: tuple[ComplianceFinding, str] | None = None,
 ) -> HumanReview:
-    status_statement = select(ComplianceSession.status).where(ComplianceSession.id == session.id)
-    if db.bind and db.bind.dialect.name == "postgresql":
-        status_statement = status_statement.with_for_update()
-    current_status = await db.scalar(status_statement)
-    if current_status != ComplianceSessionStatus.NEEDS_REVIEW.value:
+    session = await _lock_session(db, session.id)
+    if session.status != ComplianceSessionStatus.NEEDS_REVIEW.value:
         raise ValueError("Session does not require human review")
+    _validate_current_base(session, base_version_id)
     findings = await findings_for_session(
         db,
         session.id,
@@ -566,7 +566,7 @@ async def add_human_review(
         session.status = ComplianceSessionStatus.WAITING_FOR_INFORMATION.value
         session.current_question = notes or "What should change before this posting is approved?"
     else:
-        session.status = ComplianceSessionStatus.FAILED.value
+        session.status = ComplianceSessionStatus.REJECTED.value
         session.error_message = notes or "A reviewer rejected this posting."
     await db.commit()
     return review

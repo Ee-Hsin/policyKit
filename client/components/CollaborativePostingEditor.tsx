@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import {
   ApiError,
   checkSession,
@@ -80,6 +80,17 @@ export function CollaborativePostingEditor({
   const [suggestion, setSuggestion] = useState<WritingSuggestionResult | null>(null);
   const [busy, setBusy] = useState<"save" | "check" | "suggest" | null>(null);
   const [error, setError] = useState("");
+  const [announcement, setAnnouncement] = useState("");
+  const [storageReady, setStorageReady] = useState(false);
+  const restoredStoredDraft = useRef(false);
+  const latestBaseVersionId = useRef(baseVersionId);
+  const latestDraft = useRef(draft);
+  const latestServerVersionId = useRef(currentVersion.id);
+  latestBaseVersionId.current = baseVersionId;
+  latestDraft.current = draft;
+  latestServerVersionId.current = currentVersion.id;
+
+  const draftStorageKey = `policykit:posting-draft:${session.id}`;
 
   const locked = session.status === "queued" || session.status === "investigating";
   const published = session.status === "published";
@@ -89,6 +100,53 @@ export function CollaborativePostingEditor({
   const draftCharacters = Array.from(draft).length;
   const selectionRequired = draftCharacters > 12_000 && selectedCharacters === 0;
   const orderedVersions = [...session.posting_versions].sort((a, b) => b.version - a.version);
+
+  useEffect(() => {
+    if (restoredStoredDraft.current) return;
+    restoredStoredDraft.current = true;
+    try {
+      const storedValue = window.localStorage.getItem(draftStorageKey);
+      if (!storedValue) return;
+      const stored = JSON.parse(storedValue) as { baseVersionId?: unknown; draft?: unknown };
+      if (typeof stored.baseVersionId !== "string" || typeof stored.draft !== "string") {
+        window.localStorage.removeItem(draftStorageKey);
+        return;
+      }
+      const storedBase = session.posting_versions.find(
+        (version) => version.id === stored.baseVersionId,
+      );
+      if (!storedBase || stored.draft.length > 100_000 || stored.draft === storedBase.content) {
+        window.localStorage.removeItem(draftStorageKey);
+        return;
+      }
+      setDraft(stored.draft);
+      setBaseContent(storedBase.content);
+      setBaseVersionId(storedBase.id);
+      setDirty(true);
+      if (storedBase.id !== currentVersion.id) setRemoteVersion(currentVersion);
+      setAnnouncement("Your unsaved browser draft was restored.");
+    } catch {
+      window.localStorage.removeItem(draftStorageKey);
+    } finally {
+      setStorageReady(true);
+    }
+  }, [currentVersion, draftStorageKey, session.posting_versions]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    try {
+      if (dirty) {
+        window.localStorage.setItem(
+          draftStorageKey,
+          JSON.stringify({ baseVersionId, draft }),
+        );
+      } else {
+        window.localStorage.removeItem(draftStorageKey);
+      }
+    } catch {
+      return;
+    }
+  }, [baseVersionId, dirty, draft, draftStorageKey, storageReady]);
 
   useEffect(() => {
     onDirtyChange(dirty);
@@ -203,7 +261,11 @@ export function CollaborativePostingEditor({
     ) return;
     setBusy("suggest");
     setError("");
+    setAnnouncement("");
     setSuggestion(null);
+    const requestedBaseVersionId = baseVersionId;
+    const requestedDraft = draft;
+    const requestedServerVersionId = currentVersion.id;
     try {
       const hasSelection = selection.end > selection.start;
       const selectionStart = Array.from(draft.slice(0, selection.start)).length;
@@ -216,10 +278,16 @@ export function CollaborativePostingEditor({
           ? { selection_start: selectionStart, selection_end: selectionEnd }
           : {}),
       });
-      if (result.base_version_id !== baseVersionId) {
+      if (
+        result.base_version_id !== requestedBaseVersionId ||
+        latestBaseVersionId.current !== requestedBaseVersionId ||
+        latestServerVersionId.current !== requestedServerVersionId ||
+        latestDraft.current !== requestedDraft
+      ) {
         setError("The saved draft changed while the suggestion was running. Try again.");
       } else {
         setSuggestion(result);
+        setAnnouncement("Writing suggestion ready.");
       }
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : "Could not create a writing suggestion.");
@@ -262,6 +330,12 @@ export function CollaborativePostingEditor({
     updateDraft(suggestion.suggested_text);
     setSelection({ start: 0, end: 0 });
     setSuggestion(null);
+    setAnnouncement("Writing suggestion added to the editor. Save the draft when ready.");
+  }
+
+  function rejectSuggestion() {
+    setSuggestion(null);
+    setAnnouncement("Writing suggestion discarded.");
   }
 
   function discardDraft() {
@@ -274,6 +348,8 @@ export function CollaborativePostingEditor({
     ? "Published postings are read-only."
       : locked
       ? "Editing is paused while the compliance agent is running."
+      : session.status === "rejected"
+        ? "This posting was rejected. Edit and save a new version before checking again."
       : session.status === "failed"
         ? "The last check stopped. You can retry this saved draft."
       : remoteVersion
@@ -288,6 +364,7 @@ export function CollaborativePostingEditor({
 
   return (
     <section className="posting-panel collaborative-editor" aria-label="Job posting editor">
+      <p className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>
       <div className="panel-heading editor-heading">
         <div>
           <p className="kicker">Current posting</p>
@@ -415,7 +492,7 @@ export function CollaborativePostingEditor({
           ) : null}
 
           {suggestion ? (
-            <div className="suggestion-preview" aria-live="polite">
+            <div className="suggestion-preview">
               <div className="suggestion-preview__heading">
                 <div>
                   <p className="kicker">Suggestion preview</p>
@@ -426,7 +503,7 @@ export function CollaborativePostingEditor({
               <div className="suggestion-preview__text">{suggestion.suggested_text}</div>
               <div className="button-row">
                 <button className="button button--primary" type="button" onClick={acceptSuggestion}>Accept suggestion</button>
-                <button className="button button--secondary" type="button" onClick={() => setSuggestion(null)}>Reject</button>
+                <button className="button button--secondary" type="button" onClick={rejectSuggestion}>Reject</button>
               </div>
             </div>
           ) : null}
