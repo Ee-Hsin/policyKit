@@ -49,11 +49,13 @@ class FailingGateway:
 
 
 async def create_and_publish_policy(
-    api_client: httpx.AsyncClient, monkeypatch
+    api_client: httpx.AsyncClient,
+    monkeypatch,
+    policy_request: dict = POLICY_REQUEST,
 ) -> tuple[dict, dict]:
     monkeypatch.setattr(policy_endpoints, "OpenAIGateway", NoCostGateway)
     monkeypatch.setattr(policy_endpoints, "ChromaIndex", NoCostIndex)
-    created_response = await api_client.post("/api/v1/policies", json=POLICY_REQUEST)
+    created_response = await api_client.post("/api/v1/policies", json=policy_request)
     assert created_response.status_code == 201
     created = created_response.json()
     version = created["versions"][0]
@@ -71,15 +73,14 @@ async def test_health_uses_the_test_database(api_client: httpx.AsyncClient) -> N
     assert response.json() == {"status": "healthy", "database": "connected"}
 
 
-async def test_session_requires_a_published_policy_snapshot(
+async def test_session_starts_as_an_unscheduled_draft_without_a_policy_snapshot(
     api_client: httpx.AsyncClient,
 ) -> None:
     response = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == (
-        "Publish at least one policy before starting a compliance session"
-    )
+    assert response.status_code == 201
+    assert response.json()["status"] == ComplianceSessionStatus.DRAFT.value
+    assert response.json()["policy_snapshot_version"] is None
 
 
 async def test_session_rejects_scope_values_that_could_skip_policies(
@@ -192,11 +193,19 @@ async def test_admin_can_publish_a_policy_and_session_is_pinned_to_its_snapshot(
     assert published["policy"]["versions"][0]["status"] == "published"
 
     response = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
-    assert response.status_code == 202
+    assert response.status_code == 201
     session = response.json()
-    assert session["status"] == "queued"
-    assert session["policy_snapshot_version"] == 1
+    assert session["status"] == "draft"
+    assert session["policy_snapshot_version"] is None
     assert session["current_posting_version"]["source"] == "user"
+
+    check = await api_client.post(
+        f"/api/v1/compliance-sessions/{session['id']}/check",
+        json={"base_version_id": session["current_posting_version"]["id"]},
+    )
+    assert check.status_code == 202
+    assert check.json()["status"] == "queued"
+    assert check.json()["policy_snapshot_version"] == 1
 
     update_response = await api_client.patch(
         f"/api/v1/policies/{created['id']}/versions/{created['versions'][0]['id']}",
@@ -215,14 +224,21 @@ async def test_session_approval_and_publish_endpoints_enforce_state(
 
     approval = await api_client.post(
         f"/api/v1/compliance-sessions/{session_id}/approve",
-        json={"approved": True, "reviewer_name": "Test recruiter"},
+        json={
+            "base_version_id": created.json()["current_posting_version"]["id"],
+            "approved": True,
+            "reviewer_name": "Test recruiter",
+        },
     )
     assert approval.status_code == 409
     assert approval.json()["detail"] == "The session is not waiting for revision approval"
 
     publication = await api_client.post(
         f"/api/v1/compliance-sessions/{session_id}/publish",
-        json={"publisher_name": "Test recruiter"},
+        json={
+            "base_version_id": created.json()["current_posting_version"]["id"],
+            "publisher_name": "Test recruiter",
+        },
     )
     assert publication.status_code == 409
     assert publication.json()["detail"] == "Only a ready posting can be published"
@@ -236,6 +252,10 @@ async def test_message_response_includes_the_recorded_user_step(
     await create_and_publish_policy(api_client, monkeypatch)
     created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
     session_id = created.json()["id"]
+    await api_client.post(
+        f"/api/v1/compliance-sessions/{session_id}/check",
+        json={"base_version_id": created.json()["current_posting_version"]["id"]},
+    )
     session = await session_repository.get_session(db, session_id)
     session.status = ComplianceSessionStatus.WAITING_FOR_INFORMATION.value
     session.current_question = "Which location should be used?"
@@ -243,7 +263,10 @@ async def test_message_response_includes_the_recorded_user_step(
 
     response = await api_client.post(
         f"/api/v1/compliance-sessions/{session_id}/messages",
-        json={"message": "Use New York."},
+        json={
+            "base_version_id": created.json()["current_posting_version"]["id"],
+            "message": "Use New York.",
+        },
     )
 
     assert response.status_code == 200
@@ -261,6 +284,10 @@ async def test_publish_response_includes_the_publication_step(
     await create_and_publish_policy(api_client, monkeypatch)
     created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
     session_id = created.json()["id"]
+    await api_client.post(
+        f"/api/v1/compliance-sessions/{session_id}/check",
+        json={"base_version_id": created.json()["current_posting_version"]["id"]},
+    )
     session = await session_repository.get_session(db, session_id)
     snapshot = await policy_repository.get_snapshot(db, session.policy_snapshot_id)
     policy_version_id = snapshot.items[0].policy_version_id
@@ -280,7 +307,10 @@ async def test_publish_response_includes_the_publication_step(
 
     response = await api_client.post(
         f"/api/v1/compliance-sessions/{session_id}/publish",
-        json={"publisher_name": "Test recruiter"},
+        json={
+            "base_version_id": session.current_posting_version_id,
+            "publisher_name": "Test recruiter",
+        },
     )
 
     assert response.status_code == 200
@@ -298,6 +328,10 @@ async def test_reviewer_cannot_approve_an_unchecked_escalated_session(
     await create_and_publish_policy(api_client, monkeypatch)
     created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
     session_id = created.json()["id"]
+    await api_client.post(
+        f"/api/v1/compliance-sessions/{session_id}/check",
+        json={"base_version_id": created.json()["current_posting_version"]["id"]},
+    )
     session = await session_repository.get_session(db, session_id)
     session.status = ComplianceSessionStatus.NEEDS_REVIEW.value
     await db.commit()
@@ -325,6 +359,10 @@ async def test_reviewer_cannot_promote_evidence_from_an_older_posting_version(
 ) -> None:
     await create_and_publish_policy(api_client, monkeypatch)
     created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
+    await api_client.post(
+        f"/api/v1/compliance-sessions/{created.json()['id']}/check",
+        json={"base_version_id": created.json()["current_posting_version"]["id"]},
+    )
     session = await session_repository.get_session(db, created.json()["id"])
     snapshot = await policy_repository.get_snapshot(db, session.policy_snapshot_id)
     policy_version_id = snapshot.items[0].policy_version_id

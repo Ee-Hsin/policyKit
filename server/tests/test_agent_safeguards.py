@@ -60,9 +60,10 @@ async def compliance_session(db: AsyncSession, snapshot: PolicySnapshot):
             ),
             target_locations=["New York"],
         ),
-        snapshot,
     )
+    session.policy_snapshot_id = snapshot.id
     session.status = ComplianceSessionStatus.INVESTIGATING.value
+    session.started_at = session.created_at
     await db.commit()
     return await session_repository.get_session(db, session.id)
 
@@ -274,6 +275,23 @@ async def test_completion_uses_the_session_start_time_for_an_expiring_policy(
     result = await executor.execute("complete_session", {"summary": "Ready to publish"})
 
     assert result["status"] == ComplianceSessionStatus.READY_TO_PUBLISH.value
+
+
+async def test_policy_applicability_uses_the_explicit_check_start_time(
+    db: AsyncSession,
+) -> None:
+    snapshot = await policy_snapshot(db, count=1)
+    session = await compliance_session(db, snapshot)
+    pinned_snapshot = await policy_repository.get_snapshot(db, snapshot.id)
+    session.started_at = session.created_at + timedelta(minutes=2)
+    pinned_snapshot.items[0].policy_version.effective_at = session.created_at + timedelta(minutes=1)
+    await db.commit()
+    ai = FakeAI(output_factory=output_factory({}))
+
+    result = await run_compliance_check(db, session, ai)
+
+    assert len(result.policies) == 1
+    assert result.policies[0].id == pinned_snapshot.items[0].policy_version_id
 
 
 async def test_completion_rejects_findings_from_a_previous_location_scope(

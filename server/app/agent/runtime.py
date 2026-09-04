@@ -75,7 +75,7 @@ async def build_agent_state(db: AsyncSession, session: ComplianceSession) -> dic
                 jurisdictions=jurisdictions,
                 employment_type=session.posting.employment_type,
                 platform=session.posting.platform,
-                at=session.created_at,
+                at=session.started_at or session.created_at,
             )
         }
     checked_policy_ids = [finding.policy_version_id for finding in findings]

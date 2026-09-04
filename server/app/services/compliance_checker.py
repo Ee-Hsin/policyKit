@@ -108,7 +108,7 @@ async def run_compliance_check(
         jurisdictions=jurisdictions,
         employment_type=session.posting.employment_type,
         platform=session.posting.platform,
-        at=session.created_at,
+        at=session.started_at or session.created_at,
     )
     if not policies:
         raise InvalidComplianceOutputError("No applicable policies were found")
@@ -181,6 +181,7 @@ async def run_compliance_check(
         name="Checked all applicable policies",
         input_data={
             "posting_version": session.current_posting_version.version,
+            "posting_version_id": session.current_posting_version_id,
             "policy_keys": [policy.policy.key for policy in policies],
         },
         output_data={

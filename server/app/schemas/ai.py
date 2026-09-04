@@ -31,6 +31,15 @@ class ComplianceCheckOutput(BaseModel):
     summary: str
 
 
+class InitialPostingDraftOutput(BaseModel):
+    suggested_content: str = Field(min_length=30, max_length=100_000)
+
+
+class WritingSuggestionOutput(BaseModel):
+    suggested_text: str = Field(min_length=1, max_length=100_000)
+    summary: str = Field(min_length=1, max_length=500)
+
+
 class ToolCall(BaseModel):
     call_id: str
     name: str
