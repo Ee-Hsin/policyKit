@@ -1,8 +1,13 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { JurisdictionSelect } from "@/components/JurisdictionSelect";
 import { PanelIcon } from "@/components/PanelIcon";
-import type { PolicyCreateInput, PolicyDraftInput, PolicyVersionFields } from "@/lib/types";
+import type {
+  PolicyCreateInput,
+  PolicyDraftInput,
+  PolicyVersionFields,
+} from "@/lib/types";
 
 const emptyFields: PolicyVersionFields = {
   rule_text: "",
@@ -24,7 +29,10 @@ function listToText(items: string[]) {
 }
 
 function textToList(value: string) {
-  return value.split(/\n|,/).map((item) => item.trim()).filter(Boolean);
+  return value
+    .split(/\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function toLocalDate(value: string | null) {
@@ -67,13 +75,21 @@ export function PolicyForm({
   const [rationale, setRationale] = useState(values.rationale ?? "");
   const [remediation, setRemediation] = useState(values.remediation ?? "");
   const [enforcement, setEnforcement] = useState(values.enforcement_level);
-  const [jurisdictions, setJurisdictions] = useState(listToText(values.jurisdictions));
-  const [employmentTypes, setEmploymentTypes] = useState(listToText(values.employment_types));
+  const [jurisdictions, setJurisdictions] = useState(values.jurisdictions);
+  const [employmentTypes, setEmploymentTypes] = useState(
+    listToText(values.employment_types),
+  );
   const [platforms, setPlatforms] = useState(listToText(values.platforms));
-  const [violationExamples, setViolationExamples] = useState(listToText(values.violation_examples));
-  const [compliantExamples, setCompliantExamples] = useState(listToText(values.compliant_examples));
+  const [violationExamples, setViolationExamples] = useState(
+    listToText(values.violation_examples),
+  );
+  const [compliantExamples, setCompliantExamples] = useState(
+    listToText(values.compliant_examples),
+  );
   const [exceptions, setExceptions] = useState(listToText(values.exceptions));
-  const [effectiveAt, setEffectiveAt] = useState(toLocalDate(values.effective_at));
+  const [effectiveAt, setEffectiveAt] = useState(
+    toLocalDate(values.effective_at),
+  );
   const [expiresAt, setExpiresAt] = useState(toLocalDate(values.expires_at));
 
   async function submit(event: FormEvent) {
@@ -85,7 +101,7 @@ export function PolicyForm({
       rationale: rationale || null,
       remediation: remediation || null,
       enforcement_level: enforcement,
-      jurisdictions: textToList(jurisdictions),
+      jurisdictions,
       employment_types: textToList(employmentTypes),
       platforms: textToList(platforms),
       violation_examples: textToList(violationExamples),
@@ -94,7 +110,7 @@ export function PolicyForm({
       effective_at: toApiDate(effectiveAt),
       expires_at: toApiDate(expiresAt),
     };
-    await onSubmit(create ? { ...fields, key } as PolicyCreateInput : fields);
+    await onSubmit(create ? ({ ...fields, key } as PolicyCreateInput) : fields);
   }
 
   return (
@@ -117,18 +133,34 @@ export function PolicyForm({
               maxLength={80}
               pattern="[A-Z0-9][A-Z0-9_-]{2,79}"
               value={key}
-              onChange={(event) => setKey(event.target.value.toUpperCase().replaceAll(" ", "_"))}
+              onChange={(event) =>
+                setKey(event.target.value.toUpperCase().replaceAll(" ", "_"))
+              }
               placeholder="NY-PAY-001"
             />
             <small>Stable across all versions.</small>
           </label>
           <label className="field">
             <span>Title</span>
-            <input required minLength={3} maxLength={240} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Salary range disclosure" />
+            <input
+              required
+              minLength={3}
+              maxLength={240}
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Salary range disclosure"
+            />
           </label>
           <label className="field">
             <span>Category</span>
-            <input required minLength={2} maxLength={80} value={category} onChange={(event) => setCategory(event.target.value)} placeholder="Compensation" />
+            <input
+              required
+              minLength={2}
+              maxLength={80}
+              value={category}
+              onChange={(event) => setCategory(event.target.value)}
+              placeholder="Compensation"
+            />
           </label>
         </div>
       </section>
@@ -143,16 +175,35 @@ export function PolicyForm({
         </div>
         <label className="field">
           <span>Policy rule</span>
-          <textarea className="textarea--rule" required minLength={10} value={ruleText} onChange={(event) => setRuleText(event.target.value)} placeholder="State the requirement in precise, testable language…" />
+          <textarea
+            className="textarea--rule"
+            required
+            minLength={10}
+            value={ruleText}
+            onChange={(event) => setRuleText(event.target.value)}
+            placeholder="State the requirement in precise, testable language…"
+          />
         </label>
         <div className="form-grid form-grid--two">
           <label className="field">
-            <span>Rationale <em>Optional</em></span>
-            <textarea value={rationale} onChange={(event) => setRationale(event.target.value)} placeholder="Why this policy exists…" />
+            <span>
+              Rationale <em>Optional</em>
+            </span>
+            <textarea
+              value={rationale}
+              onChange={(event) => setRationale(event.target.value)}
+              placeholder="Why this policy exists…"
+            />
           </label>
           <label className="field">
-            <span>Recommended remediation <em>Optional</em></span>
-            <textarea value={remediation} onChange={(event) => setRemediation(event.target.value)} placeholder="How the agent should resolve a violation…" />
+            <span>
+              Recommended remediation <em>Optional</em>
+            </span>
+            <textarea
+              value={remediation}
+              onChange={(event) => setRemediation(event.target.value)}
+              placeholder="How the agent should resolve a violation…"
+            />
           </label>
         </div>
       </section>
@@ -166,36 +217,64 @@ export function PolicyForm({
           </div>
         </div>
         <div className="form-grid form-grid--three">
+          <JurisdictionSelect
+            includeGlobal
+            label="Jurisdictions"
+            value={jurisdictions}
+            onChange={setJurisdictions}
+          />
           <label className="field">
-            <span>Jurisdictions</span>
-            <textarea value={jurisdictions} onChange={(event) => setJurisdictions(event.target.value)} placeholder="GLOBAL" />
-            <small>One per line, for example US-NY.</small>
-          </label>
-          <label className="field">
-            <span>Employment types <em>Optional</em></span>
-            <textarea value={employmentTypes} onChange={(event) => setEmploymentTypes(event.target.value)} placeholder={"full_time\ncontract"} />
+            <span>
+              Employment types <em>Optional</em>
+            </span>
+            <textarea
+              value={employmentTypes}
+              onChange={(event) => setEmploymentTypes(event.target.value)}
+              placeholder={"full_time\ncontract"}
+            />
             <small>Empty means all employment types.</small>
           </label>
           <label className="field">
-            <span>Platforms <em>Optional</em></span>
-            <textarea value={platforms} onChange={(event) => setPlatforms(event.target.value)} placeholder="policykit" />
+            <span>
+              Platforms <em>Optional</em>
+            </span>
+            <textarea
+              value={platforms}
+              onChange={(event) => setPlatforms(event.target.value)}
+              placeholder="policykit"
+            />
             <small>Empty means all platforms.</small>
           </label>
           <label className="field">
             <span>Enforcement level</span>
-            <select value={enforcement} onChange={(event) => setEnforcement(event.target.value)}>
+            <select
+              value={enforcement}
+              onChange={(event) => setEnforcement(event.target.value)}
+            >
               <option value="standard">Standard</option>
               <option value="high">High</option>
               <option value="critical">Critical</option>
             </select>
           </label>
           <label className="field">
-            <span>Effective at <em>Optional</em></span>
-            <input type="datetime-local" value={effectiveAt} onChange={(event) => setEffectiveAt(event.target.value)} />
+            <span>
+              Effective at <em>Optional</em>
+            </span>
+            <input
+              type="datetime-local"
+              value={effectiveAt}
+              onChange={(event) => setEffectiveAt(event.target.value)}
+            />
           </label>
           <label className="field">
-            <span>Expires at <em>Optional</em></span>
-            <input type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} />
+            <span>
+              Expires at <em>Optional</em>
+            </span>
+            <input
+              type="datetime-local"
+              value={expiresAt}
+              onChange={(event) => setExpiresAt(event.target.value)}
+            />
           </label>
         </div>
       </section>
@@ -211,17 +290,29 @@ export function PolicyForm({
         <div className="form-grid form-grid--three">
           <label className="field">
             <span>Violation examples</span>
-            <textarea value={violationExamples} onChange={(event) => setViolationExamples(event.target.value)} placeholder={"Competitive salary\nRecent graduates preferred"} />
+            <textarea
+              value={violationExamples}
+              onChange={(event) => setViolationExamples(event.target.value)}
+              placeholder={"Competitive salary\nRecent graduates preferred"}
+            />
             <small>One example per line.</small>
           </label>
           <label className="field">
             <span>Compliant examples</span>
-            <textarea value={compliantExamples} onChange={(event) => setCompliantExamples(event.target.value)} placeholder="The annual salary range is $90,000–$110,000 USD." />
+            <textarea
+              value={compliantExamples}
+              onChange={(event) => setCompliantExamples(event.target.value)}
+              placeholder="The annual salary range is $90,000–$110,000 USD."
+            />
             <small>One example per line.</small>
           </label>
           <label className="field">
             <span>Exceptions</span>
-            <textarea value={exceptions} onChange={(event) => setExceptions(event.target.value)} placeholder="Volunteer roles" />
+            <textarea
+              value={exceptions}
+              onChange={(event) => setExceptions(event.target.value)}
+              placeholder="Volunteer roles"
+            />
             <small>One exception per line.</small>
           </label>
         </div>
@@ -232,7 +323,12 @@ export function PolicyForm({
           <strong>{create ? "Create as draft" : "Save draft changes"}</strong>
           <p>Published versions remain immutable.</p>
         </div>
-        <button className="button button--primary button--large" disabled={submitting}>{submitting ? "Saving…" : submitLabel}</button>
+        <button
+          className="button button--primary button--large"
+          disabled={submitting}
+        >
+          {submitting ? "Saving…" : submitLabel}
+        </button>
       </div>
     </form>
   );
