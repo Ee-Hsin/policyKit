@@ -3,7 +3,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { PanelIcon } from "@/components/PanelIcon";
 import { PolicyForm } from "@/components/PolicyForm";
 import {
   ApiError,
@@ -18,27 +17,20 @@ import type { PolicyDetail, PolicyDraftInput, PolicyVersion } from "@/lib/types"
 
 function ReadOnlyVersion({ version }: { version: PolicyVersion }) {
   return (
-    <div className="policy-readonly">
-      <section className="admin-card">
-        <div className="admin-card__heading">
-          <PanelIcon kind="rule" />
-          <div><p className="kicker">Decision standard</p><h2>Policy rule</h2></div>
-        </div>
+    <div className="policy-readonly policy-form-surface">
+      <section className="policy-form-section">
+        <h2>Rule</h2>
         <p className="rule-copy">{version.rule_text}</p>
         <div className="definition-grid">
           <div><span>Rationale</span><p>{version.rationale || "Not provided"}</p></div>
           <div><span>Recommended remediation</span><p>{version.remediation || "Not provided"}</p></div>
         </div>
       </section>
-      <section className="admin-card">
-        <div className="admin-card__heading">
-          <PanelIcon kind="scope" />
-          <div><p className="kicker">Scope and guidance</p><h2>Application details</h2></div>
-        </div>
+      <section className="policy-form-section">
+        <h2>Scope and guidance</h2>
         <div className="definition-grid definition-grid--three">
           <div><span>Jurisdictions</span><div className="tag-row">{version.jurisdictions.map((item) => <span className="tag" key={item}>{item}</span>)}</div></div>
           <div><span>Employment types</span><p>{version.employment_types.map(labelize).join(", ") || "All types"}</p></div>
-          <div><span>Platforms</span><p>{version.platforms.join(", ") || "All platforms"}</p></div>
           <div><span>Violation examples</span>{version.violation_examples.length ? <ul>{version.violation_examples.map((item) => <li key={item}>{item}</li>)}</ul> : <p>None</p>}</div>
           <div><span>Compliant examples</span>{version.compliant_examples.length ? <ul>{version.compliant_examples.map((item) => <li key={item}>{item}</li>)}</ul> : <p>None</p>}</div>
           <div><span>Exceptions</span>{version.exceptions.length ? <ul>{version.exceptions.map((item) => <li key={item}>{item}</li>)}</ul> : <p>None</p>}</div>
@@ -144,30 +136,29 @@ export default function PolicyDetailPage() {
   }
 
   return (
-    <div className="page-shell admin-shell admin-shell--editor">
-      <div className="editor-header">
+    <div className="page-shell admin-shell admin-shell--editor policy-editor-page">
+      <header className="simple-editor-header">
         <div>
           <Link className="back-link" href="/admin/policies">← All policies</Link>
-          <p className="kicker">{policy.key} · {labelize(policy.category)}</p>
           <h1>{policy.title}</h1>
-          <p>Inspect prior versions, test a draft, and publish a new immutable policy snapshot.</p>
+          <p>{labelize(policy.category)} · {policy.key}</p>
         </div>
-        <div className="editor-header__actions">
-          {!hasDraft ? <button className="button button--secondary" disabled={busy} onClick={() => void createDraft()}>+ Create new version</button> : null}
+        <div className="simple-editor-header__actions">
+          {!hasDraft ? <button className="button button--primary" disabled={busy} onClick={() => void createDraft()}>Create new version</button> : null}
+          {selected.status === "draft" ? <button className="button button--secondary" disabled={busy} form="policy-draft-form" type="submit">{busy ? "Saving…" : "Save draft"}</button> : null}
           {selected.status === "draft" ? <button className="button button--primary" disabled={busy} onClick={() => void publish()}>Publish version</button> : null}
         </div>
-      </div>
+      </header>
 
       <div className="version-bar">
         <div>
           <label htmlFor="policy-version">Viewing</label>
           <select id="policy-version" value={selected.id} onChange={(event) => { setSelectedVersionId(event.target.value); setTestResult(null); setNotice(""); }}>
-            {versions.map((version) => <option value={version.id} key={version.id}>Version {version.version} · {labelize(version.status)}</option>)}
+            {versions.map((version) => <option value={version.id} key={version.id}>Version {version.version}</option>)}
           </select>
         </div>
         <div className="version-bar__meta">
-          <span className={`status-pill status-pill--${selected.status === "published" ? "success" : "warning"}`}>{labelize(selected.status)}</span>
-          <span className={`index-label index-label--${selected.index_status}`}>Chroma: {labelize(selected.index_status)}</span>
+          <span className="policy-version-status">{labelize(selected.status)}</span>
           <span>Updated {formatDate(selected.updated_at)}</span>
         </div>
       </div>
@@ -183,17 +174,14 @@ export default function PolicyDetailPage() {
           initialCategory={policy.category}
           policyKey={policy.key}
           submitting={busy}
+          formId="policy-draft-form"
           submitLabel="Save draft"
           onSubmit={(input) => save(input as PolicyDraftInput)}
         />
       ) : <ReadOnlyVersion version={selected} />}
 
-      <section className="admin-card test-card">
-        <div className="admin-card__heading">
-          <PanelIcon kind="test" />
-          <div><p className="kicker">Model check</p><h2>Test this policy version</h2></div>
-        </div>
-        <p>Try a sample job-posting excerpt before publication. Testing does not modify the policy.</p>
+      <details className="test-card simple-test-card">
+        <summary>Test policy</summary>
         <form onSubmit={runTest}>
           <label className="field">
             <span>Job-posting excerpt</span>
@@ -208,7 +196,7 @@ export default function PolicyDetailPage() {
             {testResult.evidence_text ? <blockquote>“{testResult.evidence_text}”</blockquote> : null}
           </div>
         ) : null}
-      </section>
+      </details>
     </div>
   );
 }

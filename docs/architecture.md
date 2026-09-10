@@ -45,7 +45,9 @@ flowchart TB
 ```
 
 Job descriptions, recruiter messages, retrieved passages, and tool output are untrusted
-data. They cannot change the runtime instructions or tool permissions.
+data. They cannot change the runtime instructions or tool permissions. They can still
+influence model judgment, so PolicyKit treats prompt-injection resistance as a tested
+defense rather than a guarantee.
 
 ## Request sequence
 
@@ -77,10 +79,12 @@ sequenceDiagram
         K->>O: Findings and available tools
         O-->>K: Exact proposed edits
         K->>K: Reconstruct revision from declared edits
-        K->>P: Wait for recruiter approval
-        R->>W: Approve revision
-        W->>A: POST approval
-        A->>P: Queue approved version for a fresh check
+        K->>P: Wait for recruiter decisions
+        R->>W: Accept or reject each proposed edit
+        W->>A: POST edit decisions
+        A->>P: Build a posting from accepted edits
+        A->>P: Store rejected edits as agent feedback
+        A->>P: Queue the selected posting for a fresh check
     else Missing fact or ambiguous policy
         K->>P: Ask recruiter or request human review
     end
@@ -93,8 +97,12 @@ activity, and current-state tool schemas. It chooses one action. It does not rec
 full policy catalog and cannot declare a posting compliant by itself.
 
 The classifier runs inside `run_compliance_check`. Python supplies every policy applicable
-to the session's immutable snapshot and requires one structured assessment per policy.
-The classifier has no tools and cannot choose a smaller policy set.
+to the session's immutable snapshot. Policies are processed in bounded batches while each
+batch receives the complete posting. Python combines the responses and still requires one
+structured assessment per applicable policy. The classifier has no tools and cannot choose
+a smaller policy set. A response that reaches its output limit receives one retry with a
+larger limit. A second incomplete response stops the session and records the response IDs,
+reason, and token use.
 
 ## Durable state
 
@@ -162,6 +170,15 @@ zero model tokens.
 Publication runs the same gate again. A stale status or direct API call cannot bypass full
 coverage. Missing or failed work produces a retry, a focused question, a human-review
 request, or a failed session.
+
+## Revision decisions
+
+The recruiter decides on each proposed edit. The API requires one decision for every
+pending edit and rejects incomplete decision sets. If all edits are accepted,
+the complete agent draft becomes the current approved posting. If only some edits are
+accepted, Python reconstructs a new approved posting from those edits only. If all edits
+are rejected, the original posting remains current. Rejected edits and the recruiter note
+are stored as feedback. Every result returns to the queue for a new compliance check.
 
 ## Failure behavior
 

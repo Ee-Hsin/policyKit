@@ -34,7 +34,8 @@ class Settings(BaseSettings):
     openai_store_responses: bool = False
     openai_timeout_seconds: float = 60
     openai_agent_max_output_tokens: int = 1_200
-    openai_checker_max_output_tokens: int = 6_000
+    openai_checker_max_output_tokens: int = Field(default=12_000, ge=1_000)
+    openai_checker_policy_batch_size: int = Field(default=4, ge=1)
     openai_checker_reasoning_effort: Literal["low", "medium", "high"] = "medium"
 
     chroma_mode: Literal["persistent", "http", "disabled"] = "persistent"

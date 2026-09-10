@@ -13,7 +13,7 @@ from app.agent.tools import AGENT_TOOLS
 from app.core.config import Settings
 from app.core.time import utc_now
 from app.integrations.chroma import ChromaIndex
-from app.integrations.openai_gateway import AIGateway
+from app.integrations.openai_gateway import AIGateway, IncompleteClassifierResponseError
 from app.models.entities import (
     ComplianceSession,
     ComplianceSessionStatus,
@@ -205,18 +205,37 @@ class AgentToolExecutor:
         except Exception as error:
             await self.db.rollback()
             self.session = await session_repository.get_session(self.db, session_id)
+            retryable = not isinstance(error, IncompleteClassifierResponseError)
+            output_data = (
+                error.details()
+                if isinstance(error, IncompleteClassifierResponseError)
+                else {"error": str(error)}
+            )
+            if not retryable:
+                self.session.status = ComplianceSessionStatus.FAILED.value
+                self.session.error_message = str(error)
             await session_repository.add_step(
                 self.db,
                 session_id,
                 kind="tool",
                 name=name,
                 input_data=arguments,
-                output_data={"error": str(error)},
+                output_data=output_data,
                 status=StepStatus.FAILED.value,
                 duration_ms=round((monotonic() - started) * 1_000),
+                input_tokens=(
+                    error.input_tokens
+                    if isinstance(error, IncompleteClassifierResponseError)
+                    else None
+                ),
+                output_tokens=(
+                    error.output_tokens
+                    if isinstance(error, IncompleteClassifierResponseError)
+                    else None
+                ),
             )
             await self.db.commit()
-            return {"error": str(error), "retryable": True}
+            return {"error": str(error), "retryable": retryable}
         if name != "run_compliance_check":
             await session_repository.add_step(
                 self.db,

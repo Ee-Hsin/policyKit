@@ -1,6 +1,7 @@
 """Policy administration schemas."""
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -9,6 +10,24 @@ from app.services.jurisdictions import US_STATE_CODE_SET, normalize_location
 
 EmploymentType = Literal["full_time", "part_time", "contract", "temporary", "internship"]
 PolicyPlatform = Literal["policykit"]
+
+
+class PolicyCategory(StrEnum):
+    DISCRIMINATION = "Discrimination"
+    COMPENSATION = "Compensation"
+    EMPLOYMENT_STATUS = "Employment status"
+    TRANSPARENCY = "Transparency"
+    CONTENT = "Content"
+
+
+def canonical_policy_category(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    normalized = value.strip().casefold()
+    for category in PolicyCategory:
+        if category.value.casefold() == normalized:
+            return category
+    return value
 
 
 def canonical_policy_jurisdictions(values: list[str]) -> list[str]:
@@ -34,7 +53,7 @@ def canonical_policy_jurisdictions(values: list[str]) -> list[str]:
 
 class PolicyVersionFields(BaseModel):
     title: str = Field(min_length=3, max_length=240)
-    category: str = Field(min_length=2, max_length=80)
+    category: PolicyCategory
     rule_text: str = Field(min_length=10)
     rationale: str | None = None
     remediation: str | None = None
@@ -53,6 +72,11 @@ class PolicyVersionFields(BaseModel):
     def normalize_jurisdictions(cls, values: list[str]) -> list[str]:
         return canonical_policy_jurisdictions(values)
 
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalize_category(cls, value: object) -> object:
+        return canonical_policy_category(value)
+
 
 class PolicyCreate(PolicyVersionFields):
     key: str = Field(pattern=r"^[A-Z0-9][A-Z0-9_-]{2,79}$")
@@ -60,7 +84,7 @@ class PolicyCreate(PolicyVersionFields):
 
 class PolicyDraftUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=3, max_length=240)
-    category: str | None = Field(default=None, min_length=2, max_length=80)
+    category: PolicyCategory | None = None
     rule_text: str | None = Field(default=None, min_length=10)
     rationale: str | None = None
     remediation: str | None = None
@@ -78,6 +102,11 @@ class PolicyDraftUpdate(BaseModel):
     @classmethod
     def normalize_jurisdictions(cls, values: list[str] | None) -> list[str] | None:
         return canonical_policy_jurisdictions(values) if values is not None else None
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalize_category(cls, value: object) -> object:
+        return canonical_policy_category(value)
 
     @model_validator(mode="after")
     def reject_null_for_required_fields(self) -> "PolicyDraftUpdate":
@@ -119,7 +148,7 @@ class PolicySummary(BaseModel):
     id: str
     key: str
     title: str
-    category: str
+    category: PolicyCategory
     current_version: int
     status: str
     index_status: str
@@ -131,7 +160,7 @@ class PolicyDetail(BaseModel):
     id: str
     key: str
     title: str
-    category: str
+    category: PolicyCategory
     versions: list[PolicyVersionRead]
 
 

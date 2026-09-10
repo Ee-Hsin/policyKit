@@ -11,23 +11,10 @@ import {
   getSession,
   publishSession,
 } from "@/lib/api";
-import { formatDate, formatDuration, labelize } from "@/lib/format";
+import { labelize } from "@/lib/format";
 import type { ComplianceSession, Finding, SessionStatus } from "@/lib/types";
 
-const reviewStages = ["Draft", "Investigation", "Approval", "Ready"];
-
-function stageForStatus(status: SessionStatus) {
-  if (["draft", "queued", "investigating", "waiting_for_information", "needs_review", "failed"].includes(status)) return status === "draft" ? 0 : 1;
-  if (["changes_proposed", "waiting_for_approval"].includes(status)) return 2;
-  return 3;
-}
-
-function statusTone(status: SessionStatus) {
-  if (status === "ready_to_publish" || status === "published") return "success";
-  if (status === "failed") return "danger";
-  if (status === "waiting_for_information" || status === "waiting_for_approval" || status === "needs_review") return "warning";
-  return "active";
-}
+type ChangeDecision = "accepted" | "rejected";
 
 function AnnotatedPosting({ content, findings }: { content: string; findings: Finding[] }) {
   const annotations = findings
@@ -61,7 +48,71 @@ function AnnotatedPosting({ content, findings }: { content: string; findings: Fi
   return <div className="posting-content">{nodes}</div>;
 }
 
-function AgentPanel({ session, onUpdate }: { session: ComplianceSession; onUpdate: (next: ComplianceSession) => void }) {
+function ProposedChanges({
+  changes,
+  decisions,
+  onDecision,
+}: {
+  changes: ComplianceSession["proposed_changes"];
+  decisions: Record<string, ChangeDecision>;
+  onDecision: (changeId: string, decision: ChangeDecision) => void;
+}) {
+  return (
+    <section className="revision-review" aria-labelledby="revision-review-heading">
+      <div className="revision-review__heading">
+        <h2 id="revision-review-heading">Proposed changes</h2>
+        <span>{changes.length}</span>
+      </div>
+      <div className="revision-list">
+        {changes.map((change) => (
+          <article className={`revision-item${decisions[change.id] ? ` revision-item--${decisions[change.id]}` : ""}`} key={change.id}>
+            <div className="revision-item__text">
+              <div>
+                <span>Original</span>
+                <p>{change.original_text}</p>
+              </div>
+              <div>
+                <span>Suggested</span>
+                <p>{change.replacement_text || "Remove this text"}</p>
+              </div>
+            </div>
+            <div className="revision-item__reason">
+              <p>{change.reason}</p>
+              <div className="revision-item__decision" aria-label="Choose whether to use this suggestion">
+                <button
+                  aria-pressed={decisions[change.id] === "accepted"}
+                  className="decision-button decision-button--accept"
+                  onClick={() => onDecision(change.id, "accepted")}
+                  type="button"
+                >
+                  Approve
+                </button>
+                <button
+                  aria-pressed={decisions[change.id] === "rejected"}
+                  className="decision-button decision-button--reject"
+                  onClick={() => onDecision(change.id, "rejected")}
+                  type="button"
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReviewPanel({
+  session,
+  decisions,
+  onUpdate,
+}: {
+  session: ComplianceSession;
+  decisions: Record<string, ChangeDecision>;
+  onUpdate: (next: ComplianceSession) => void;
+}) {
   const [message, setMessage] = useState("");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
@@ -87,25 +138,37 @@ function AgentPanel({ session, onUpdate }: { session: ComplianceSession; onUpdat
   }
 
   const activeChanges = session.proposed_changes.filter((change) => change.status === "proposed");
-  const recentSteps = [...session.steps].sort((a, b) => b.sequence - a.sequence).slice(0, 5);
-
+  const reviewedChanges = activeChanges.filter((change) => decisions[change.id]);
+  const rejectedChanges = activeChanges.filter((change) => decisions[change.id] === "rejected");
+  const allChangesReviewed = reviewedChanges.length === activeChanges.length;
+  const reviewStarted = (["investigating", "changes_proposed"] as SessionStatus[])
+    .includes(session.status);
+  const policiesChecked = session.steps.some(
+    (step) =>
+      step.kind === "compliance_check" &&
+      step.status === "completed" &&
+      step.input_data.posting_version === session.current_posting_version.version,
+  );
+  const progressSteps = [
+    {
+      label: reviewStarted ? "Review started" : "Starting review",
+      state: reviewStarted ? "complete" : "active",
+    },
+    {
+      label: policiesChecked ? "Policies checked" : "Checking policies",
+      state: policiesChecked ? "complete" : reviewStarted ? "active" : "pending",
+    },
+    {
+      label: "Preparing results",
+      state: policiesChecked ? "active" : "pending",
+    },
+  ];
   return (
-    <aside className="agent-panel" aria-label="Compliance agent">
-      <div className="agent-panel__header">
-        <div className="agent-avatar" aria-hidden="true">P</div>
-        <div>
-          <p className="kicker">Compliance agent</p>
-          <h2>{session.status === "published" ? "Review complete" : "Working toward approval"}</h2>
-        </div>
-        {(["queued", "investigating"] as SessionStatus[]).includes(session.status) ? (
-          <span className="live-indicator"><i /> Live</span>
-        ) : null}
-      </div>
-
+    <section className="review-panel" aria-label="Review status">
       {session.status === "waiting_for_information" ? (
-        <div className="agent-callout agent-callout--question">
-          <p className="kicker">Information needed</p>
-          <h3>{session.current_question}</h3>
+        <section className="review-action">
+          <h2>Information needed</h2>
+          <p>{session.current_question}</p>
           <form onSubmit={submitAnswer}>
             <label className="field">
               <span>Your answer</span>
@@ -122,109 +185,86 @@ function AgentPanel({ session, onUpdate }: { session: ComplianceSession; onUpdat
               {busy ? "Sending…" : "Send and continue"}
             </button>
           </form>
-        </div>
+        </section>
       ) : null}
 
       {session.status === "waiting_for_approval" ? (
-        <div className="agent-callout">
-          <p className="kicker">Your approval</p>
-          <h3>{activeChanges.length} proposed {activeChanges.length === 1 ? "change" : "changes"}</h3>
-          <div className="change-list">
-            {activeChanges.map((change) => (
-              <article className="change-card" key={change.id}>
-                <div className="change-card__before">− {change.original_text}</div>
-                <div className="change-card__after">+ {change.replacement_text}</div>
-                <p>{change.reason}</p>
-                <div className="tag-row">
-                  {change.policy_keys.map((key) => <span className="tag" key={key}>{key}</span>)}
-                </div>
-              </article>
+        <section className="review-action">
+          <h2>Review changes</h2>
+          <p>Approve or reject each suggestion.</p>
+          <p className="review-progress">{reviewedChanges.length} of {activeChanges.length} reviewed</p>
+          {rejectedChanges.length ? (
+            <label className="field">
+              <span>Note for rejected changes <em>Optional</em></span>
+              <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Explain what should change…" />
+            </label>
+          ) : null}
+          <button
+            className="button button--primary button--full"
+            disabled={busy || !allChangesReviewed}
+            onClick={() => void run(() => approveRevision(
+              session.id,
+              activeChanges.map((change) => ({
+                change_id: change.id,
+                approved: decisions[change.id] === "accepted",
+              })),
+              notes,
             ))}
-          </div>
-          <label className="field">
-            <span>Review note <em>Optional</em></span>
-            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Add context for the agent…" />
-          </label>
-          <div className="button-row">
-            <button className="button button--primary" disabled={busy} onClick={() => void run(() => approveRevision(session.id, true, notes))}>
-              Approve changes
-            </button>
-            <button className="button button--secondary" disabled={busy} onClick={() => void run(() => approveRevision(session.id, false, notes))}>
-              Request revision
-            </button>
-          </div>
-        </div>
+          >
+            {busy ? "Saving…" : "Continue review"}
+          </button>
+        </section>
       ) : null}
 
       {session.status === "ready_to_publish" ? (
-        <div className="agent-callout agent-callout--success">
-          <span className="success-icon" aria-hidden="true">✓</span>
-          <p className="kicker">All checks complete</p>
-          <h3>This posting is ready to publish.</h3>
-          <p>Every applicable policy was checked, and no unresolved findings remain.</p>
+        <section className="review-action review-action--success">
+          <h2>Ready to publish</h2>
+          <p>No unresolved findings remain.</p>
           <button className="button button--primary button--full" disabled={busy} onClick={() => void run(() => publishSession(session.id))}>
             {busy ? "Publishing…" : "Publish posting"}
           </button>
-        </div>
+        </section>
       ) : null}
 
       {session.status === "published" ? (
-        <div className="agent-callout agent-callout--success">
-          <span className="success-icon" aria-hidden="true">✓</span>
-          <p className="kicker">Published</p>
-          <h3>The approved posting is live.</h3>
-          <p>PolicyKit saved the policy snapshot, review activity, and final posting version.</p>
+        <section className="review-action review-action--success">
+          <h2>Review complete</h2>
+          <p>The approved posting is published.</p>
           <Link className="button button--secondary button--full" href="/">Review another posting</Link>
-        </div>
+        </section>
       ) : null}
 
       {session.status === "needs_review" || session.status === "failed" ? (
-        <div className="agent-callout agent-callout--warning">
-          <p className="kicker">{session.status === "failed" ? "Review stopped" : "Human review required"}</p>
-          <h3>{session.error_message ?? "The agent could not reach a safe decision."}</h3>
-          <p>No posting was published. A reviewer can inspect the evidence and decide what happens next.</p>
-        </div>
+        <section className="review-action review-action--warning">
+          <h2>{session.status === "failed" ? "Review stopped" : "Human review required"}</h2>
+          <p>{session.error_message ?? "The review needs a decision from a person."}</p>
+        </section>
       ) : null}
 
-      {(["queued", "investigating", "changes_proposed"] as SessionStatus[]).includes(session.status) ? (
-        <div className="agent-thinking">
-          <span className="agent-thinking__orb"><i /><i /><i /></span>
-          <div>
-            <strong>{session.status === "queued" ? "Preparing the next step" : "Investigating this posting"}</strong>
-            <p>Updates appear here as the agent uses its compliance tools.</p>
-          </div>
-        </div>
+      {(["draft", "queued", "investigating", "changes_proposed"] as SessionStatus[]).includes(session.status) ? (
+        <section className="review-action review-action--pending" role="status">
+          <h2>{session.status === "draft" ? "Review not started" : session.status === "queued" ? "Review queued" : "Review in progress"}</h2>
+          {session.status !== "draft" ? (
+            <ol className="review-steps">
+              {progressSteps.map((step) => (
+                <li className={`review-step review-step--${step.state}`} key={step.label}>
+                  {step.state === "active" ? (
+                    <span className="spinner" aria-hidden="true" />
+                  ) : (
+                    <span className="review-step__indicator" aria-hidden="true">
+                      {step.state === "complete" ? "✓" : ""}
+                    </span>
+                  )}
+                  <span>{step.label}</span>
+                </li>
+              ))}
+            </ol>
+          ) : null}
+        </section>
       ) : null}
 
       {error ? <div className="alert alert--error" role="alert">{error}</div> : null}
-
-      <div className="activity">
-        <div className="activity__heading">
-          <h3>Activity</h3>
-          <span>{session.steps.length} events</span>
-        </div>
-        {recentSteps.length ? (
-          <ol className="activity-list">
-            {recentSteps.map((step) => (
-              <li key={step.id}>
-                <span className={`activity-list__icon activity-list__icon--${step.status}`} aria-hidden="true">
-                  {step.status === "failed" ? "!" : "✓"}
-                </span>
-                <div>
-                  <strong>{step.name}</strong>
-                  <p>
-                    {formatDate(step.created_at)}
-                    {formatDuration(step.duration_ms) ? ` · ${formatDuration(step.duration_ms)}` : ""}
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="empty-copy">The first activity will appear when the agent begins.</p>
-        )}
-      </div>
-    </aside>
+    </section>
   );
 }
 
@@ -233,7 +273,7 @@ export default function SessionPage() {
   const id = params.id;
   const [session, setSession] = useState<ComplianceSession | null>(null);
   const [error, setError] = useState("");
-  const [connected, setConnected] = useState(false);
+  const [changeDecisions, setChangeDecisions] = useState<Record<string, ChangeDecision>>({});
 
   useEffect(() => {
     let active = true;
@@ -246,15 +286,11 @@ export default function SessionPage() {
       if (!active) return;
       const next = JSON.parse((event as MessageEvent<string>).data) as ComplianceSession;
       setSession(next);
-      setConnected(true);
       setError("");
       if (next.status === "published" || next.status === "failed") {
         source.close();
       }
     });
-    source.onopen = () => setConnected(true);
-    source.onerror = () => setConnected(false);
-
     return () => {
       active = false;
       source.close();
@@ -294,98 +330,132 @@ export default function SessionPage() {
     );
   }
 
-  const activeStage = stageForStatus(session.status);
-  const activeFindings = sortedFindings.filter((finding) => finding.status !== "no_violation");
-  const terminal = session.status === "published" || session.status === "failed";
+  const activeChanges = session.proposed_changes.filter((change) => change.status === "proposed");
+  const reviewingChanges = session.status === "waiting_for_approval";
+  const reviewIsRunning = (["draft", "queued", "investigating", "changes_proposed"] as SessionStatus[])
+    .includes(session.status);
+  const sourcePostingVersionId = activeChanges[0]?.from_posting_version_id;
+  const sourcePosting = session.posting_versions.find(
+    (version) => version.id === sourcePostingVersionId,
+  ) ?? [...session.posting_versions]
+    .filter((version) => version.version < session.current_posting_version.version)
+    .sort((a, b) => b.version - a.version)[0];
+  const displayedPosting = reviewingChanges && sourcePosting
+    ? sourcePosting
+    : session.current_posting_version;
+  const returnedActiveFindings = sortedFindings.filter((finding) => finding.status !== "no_violation");
+  const findingsFromChanges = Array.from(
+    new Map(
+      activeChanges.flatMap((change) =>
+        change.policy_keys.map((key) => [
+          key,
+          {
+            id: `change-${key}`,
+            policy_key: "",
+            policy_title: "",
+            category: "",
+            status: "violation" as const,
+            evidence_text: change.original_text,
+            evidence_start: displayedPosting.content.includes(change.original_text)
+              ? displayedPosting.content.indexOf(change.original_text)
+              : null,
+            evidence_end: displayedPosting.content.includes(change.original_text)
+              ? displayedPosting.content.indexOf(change.original_text) + change.original_text.length
+              : null,
+            reason: change.reason,
+            confidence: null,
+            resolved: false,
+          },
+        ] as const),
+      ),
+    ).values(),
+  );
+  const activeFindings = returnedActiveFindings.length || !reviewingChanges
+    ? returnedActiveFindings
+    : findingsFromChanges;
 
   return (
-    <div className="workspace-shell">
-      <div className="workspace-topbar">
+    <div className="workspace-shell session-page">
+      <header className="session-header">
         <div>
           <Link className="back-link" href="/">← New review</Link>
-          <div className="title-line">
-            <h1>{session.title}</h1>
-            <span className={`status-pill status-pill--${statusTone(session.status)}`}>{labelize(session.status)}</span>
-          </div>
+          <h1>{session.title}</h1>
           <p>
             {session.organization_name || "Organization not provided"}
             <span>·</span>
             {session.target_locations.join(", ") || "Location pending"}
             <span>·</span>
-            Policy set v{session.policy_snapshot_version ?? "—"}
+            {labelize(session.employment_type)}
           </p>
         </div>
-        <div className={`connection-state ${connected || terminal ? "connection-state--online" : ""}`}>
-          <i /> {terminal ? "Audit saved" : connected ? "Live updates" : "Reconnecting"}
-        </div>
-      </div>
+      </header>
 
-      <ol className="progress-rail" aria-label="Compliance review progress">
-        {reviewStages.map((stage, index) => (
-          <li className={index < activeStage ? "complete" : index === activeStage ? "active" : ""} key={stage}>
-            <span>{index < activeStage ? "✓" : index + 1}</span>
-            <strong>{stage}</strong>
-          </li>
-        ))}
-      </ol>
-
-      <div className="workspace-grid">
-        <section className="posting-panel">
-          <div className="panel-heading">
-            <div>
-              <p className="kicker">Current posting</p>
-              <h2>{session.title}</h2>
+      <div className="session-grid">
+        <div className="session-document">
+          <section className="posting-panel">
+            <h2 className="sr-only">{reviewingChanges ? "Flagged posting" : "Current posting"}</h2>
+            <div className="posting-toolbar">
+              <span className="posting-toolbar__label">
+                {reviewingChanges ? "Flagged posting" : "Current posting"}
+              </span>
+              <div className="version-chip">
+                {reviewingChanges || displayedPosting.source !== "agent" ? "Original" : "Draft"}
+              </div>
             </div>
-            <div className="version-chip">
-              Version {session.current_posting_version.version}
-              {session.current_posting_version.source === "agent" ? " · Agent draft" : " · Original"}
-            </div>
-          </div>
-          <div className="posting-meta">
-            <span>{labelize(session.employment_type)}</span>
-            {session.target_locations.map((location) => <span key={location}>{location}</span>)}
-          </div>
-          <AnnotatedPosting content={session.current_posting_version.content} findings={session.findings} />
-        </section>
+            <AnnotatedPosting content={displayedPosting.content} findings={activeFindings} />
+          </section>
 
-        <AgentPanel session={session} onUpdate={setSession} />
-      </div>
-
-      <section className="findings-section">
-        <div className="section-heading">
-          <div>
-            <p className="kicker">Policy coverage</p>
-            <h2>{activeFindings.length ? `${activeFindings.length} findings need attention` : "No active findings"}</h2>
-          </div>
-          <div className="coverage-summary">
-            <strong>{session.findings.length}</strong> policies assessed
-          </div>
         </div>
-        {session.findings.length ? (
-          <div className="findings-grid">
-            {sortedFindings.map((finding) => (
-              <article className={`finding-card finding-card--${finding.status}`} key={finding.id}>
-                <div className="finding-card__top">
-                  <span className={`finding-status finding-status--${finding.status}`}>{labelize(finding.status)}</span>
-                  <span className="policy-key">{finding.policy_key}</span>
-                </div>
-                <h3>{finding.policy_title}</h3>
-                <p>{finding.reason}</p>
-                {finding.evidence_text ? <blockquote>“{finding.evidence_text}”</blockquote> : null}
-                <div className="finding-card__footer">
-                  <span>{labelize(finding.category)}</span>
-                  {finding.confidence !== null ? <span>{Math.round(finding.confidence * 100)}% confidence</span> : null}
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div className="empty-state">
-            <span className="spinner spinner--small" />
-            <p>Policy assessments will appear after the agent runs the full compliance check.</p>
-          </div>
-        )}
-      </section>
+
+        <aside className="session-sidebar">
+          <ReviewPanel session={session} decisions={changeDecisions} onUpdate={setSession} />
+
+          {!reviewIsRunning ? <section className="policy-results" aria-labelledby="policy-results-heading">
+            <div className="policy-results__heading">
+              <h2 id="policy-results-heading">
+                {activeFindings.length ? "Issues found" : "Policy results"}
+              </h2>
+              {session.findings.length || activeFindings.length ? (
+                <span>{reviewingChanges ? `${activeFindings.length} found` : `${session.findings.length} checked`}</span>
+              ) : null}
+            </div>
+
+            {activeFindings.length ? (
+              <div className="policy-result-list">
+                {activeFindings.map((finding) => (
+                  <article className={`policy-result policy-result--${finding.status}`} key={finding.id}>
+                    {finding.policy_title ? <h3>{finding.policy_title}</h3> : null}
+                    <p>{finding.reason}</p>
+                    {finding.evidence_text ? (
+                      <details>
+                        <summary>View flagged text</summary>
+                        <blockquote>“{finding.evidence_text}”</blockquote>
+                      </details>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="policy-results__empty">
+                {session.findings.length
+                  ? `${session.findings.length} policies passed.`
+                  : "Results will appear when the review is complete."}
+              </p>
+            )}
+          </section> : null}
+
+          {reviewingChanges && activeChanges.length ? (
+            <ProposedChanges
+              changes={activeChanges}
+              decisions={changeDecisions}
+              onDecision={(changeId, decision) => setChangeDecisions((current) => ({
+                ...current,
+                [changeId]: decision,
+              }))}
+            />
+          ) : null}
+        </aside>
+      </div>
     </div>
   );
 }

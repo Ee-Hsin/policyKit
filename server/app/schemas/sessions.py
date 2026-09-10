@@ -20,8 +20,13 @@ class SessionMessageCreate(BaseModel):
     message: str = Field(min_length=1, max_length=5_000)
 
 
-class RevisionApproval(BaseModel):
+class RevisionChangeDecision(BaseModel):
+    change_id: str = Field(min_length=1)
     approved: bool
+
+
+class RevisionApproval(BaseModel):
+    decisions: list[RevisionChangeDecision] = Field(min_length=1)
     reviewer_name: str = Field(default="Demo recruiter", min_length=2, max_length=160)
     notes: str | None = Field(default=None, max_length=2_000)
 
@@ -64,6 +69,8 @@ class ProposedChangeRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    from_posting_version_id: str
+    to_posting_version_id: str
     original_text: str
     replacement_text: str
     reason: str

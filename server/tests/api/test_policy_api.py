@@ -5,7 +5,7 @@ from app.api.v1.endpoints import policies as policy_endpoints
 from app.models.entities import ComplianceSessionStatus, FindingStatus, PostingVersion
 from app.repositories import policies as policy_repository
 from app.repositories import sessions as session_repository
-from app.schemas.ai import PolicyAssessment
+from app.schemas.ai import PolicyAssessment, ProposedRevision
 
 POLICY_REQUEST = {
     "key": "GLOBAL_AGE_001",
@@ -135,6 +135,24 @@ async def test_policy_input_normalizes_scope_and_rejects_unknown_values(
     assert invalid_canonical.status_code == 422
 
 
+async def test_policy_input_normalizes_category_and_rejects_unknown_values(
+    api_client: httpx.AsyncClient,
+) -> None:
+    normalized = await api_client.post(
+        "/api/v1/policies",
+        json={**POLICY_REQUEST, "key": "CATEGORY_001", "category": "compensation"},
+    )
+    invalid = await api_client.post(
+        "/api/v1/policies",
+        json={**POLICY_REQUEST, "key": "CATEGORY_002", "category": "Benefits"},
+    )
+
+    assert normalized.status_code == 201
+    assert normalized.json()["category"] == "Compensation"
+    assert normalized.json()["versions"][0]["category"] == "Compensation"
+    assert invalid.status_code == 422
+
+
 async def test_policy_input_preserves_the_canonical_canada_scope(
     api_client: httpx.AsyncClient,
 ) -> None:
@@ -215,7 +233,10 @@ async def test_session_approval_and_publish_endpoints_enforce_state(
 
     approval = await api_client.post(
         f"/api/v1/compliance-sessions/{session_id}/approve",
-        json={"approved": True, "reviewer_name": "Test recruiter"},
+        json={
+            "decisions": [{"change_id": "missing", "approved": True}],
+            "reviewer_name": "Test recruiter",
+        },
     )
     assert approval.status_code == 409
     assert approval.json()["detail"] == "The session is not waiting for revision approval"
@@ -251,6 +272,87 @@ async def test_message_response_includes_the_recorded_user_step(
     assert payload["status"] == ComplianceSessionStatus.QUEUED.value
     assert payload["steps"][-1]["kind"] == "user_message"
     assert payload["steps"][-1]["input_data"] == {"message": "Use New York."}
+
+
+async def test_proposed_revision_response_keeps_the_findings_it_addresses(
+    api_client: httpx.AsyncClient,
+    db: AsyncSession,
+    monkeypatch,
+) -> None:
+    await create_and_publish_policy(api_client, monkeypatch)
+    created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
+    session_id = created.json()["id"]
+    session = await session_repository.get_session(db, session_id)
+    snapshot = await policy_repository.get_snapshot(db, session.policy_snapshot_id)
+    policy_version_id = snapshot.items[0].policy_version_id
+    await session_repository.replace_findings(
+        db,
+        session,
+        [
+            PolicyAssessment(
+                policy_id=policy_version_id,
+                status=FindingStatus.VIOLATION,
+                evidence_text="Python services",
+                evidence_start=15,
+                evidence_end=30,
+                reason="The posting contains an age preference.",
+            )
+        ],
+    )
+    await session_repository.create_proposed_revision(
+        db,
+        session,
+        ProposedRevision(
+            revised_text="Build reliable services for our learning platform and clients.",
+            changes=[
+                {
+                    "original_text": "Python services",
+                    "replacement_text": "services",
+                    "reason": "Remove the unsupported preference.",
+                    "policy_keys": ["GLOBAL_AGE_001"],
+                },
+                {
+                    "original_text": "customers",
+                    "replacement_text": "clients",
+                    "reason": "Use broader customer language.",
+                    "policy_keys": ["GLOBAL_AGE_001"],
+                },
+            ],
+        ),
+    )
+
+    response = await api_client.get(f"/api/v1/compliance-sessions/{session_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == ComplianceSessionStatus.WAITING_FOR_APPROVAL.value
+    assert payload["current_posting_version"]["source"] == "agent"
+    assert [finding["policy_key"] for finding in payload["findings"]] == ["GLOBAL_AGE_001"]
+
+    changes = payload["proposed_changes"]
+    decision = await api_client.post(
+        f"/api/v1/compliance-sessions/{session_id}/approve",
+        json={
+            "decisions": [
+                {"change_id": changes[0]["id"], "approved": True},
+                {"change_id": changes[1]["id"], "approved": False},
+            ],
+            "reviewer_name": "Test recruiter",
+            "notes": "Keep the original customer term.",
+        },
+    )
+
+    assert decision.status_code == 200
+    decided = decision.json()
+    assert decided["status"] == ComplianceSessionStatus.QUEUED.value
+    assert decided["current_posting_version"]["content"] == (
+        "Build reliable services for our learning platform and customers."
+    )
+    assert [change["status"] for change in decided["proposed_changes"]] == [
+        "accepted",
+        "rejected",
+    ]
+    assert decided["steps"][-1]["input_data"]["notes"] == ("Keep the original customer term.")
 
 
 async def test_publish_response_includes_the_publication_step(

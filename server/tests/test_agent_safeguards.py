@@ -7,6 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.runtime import AgentToolError, AgentToolExecutor, ComplianceAgent, build_agent_state
 from app.core.config import Settings
 from app.integrations.chroma import SemanticMatch
+from app.integrations.openai_gateway import (
+    AIResponseAttempt,
+    IncompleteClassifierResponseError,
+)
 from app.models.entities import (
     AgentStep,
     ComplianceCacheEntry,
@@ -177,6 +181,62 @@ async def test_executor_rejects_a_tool_not_offered_for_the_current_state(
         "retryable": True,
     }
     assert session.status == ComplianceSessionStatus.INVESTIGATING.value
+
+
+async def test_incomplete_classifier_response_stops_without_another_agent_retry(
+    db: AsyncSession,
+) -> None:
+    snapshot = await policy_snapshot(db)
+    session = await compliance_session(db, snapshot)
+    ai = FakeAI()
+
+    async def incomplete_check(**_kwargs):
+        raise IncompleteClassifierResponseError(
+            [
+                AIResponseAttempt(
+                    response_id="response-1",
+                    status="incomplete",
+                    incomplete_reason="max_output_tokens",
+                    input_tokens=100,
+                    output_tokens=12_000,
+                    max_output_tokens=12_000,
+                    policy_count=2,
+                ),
+                AIResponseAttempt(
+                    response_id="response-2",
+                    status="incomplete",
+                    incomplete_reason="max_output_tokens",
+                    input_tokens=100,
+                    output_tokens=24_000,
+                    max_output_tokens=24_000,
+                    policy_count=2,
+                ),
+            ]
+        )
+
+    ai.check_compliance = incomplete_check
+    executor = AgentToolExecutor(
+        db,
+        session,
+        ai,
+        FakeIndex(),
+        allowed_tool_names={"run_compliance_check"},
+    )
+
+    result = await executor.execute("run_compliance_check", {})
+    stored = await session_repository.get_session(db, session.id)
+    steps = await session_repository.steps_for_session(db, session.id)
+
+    assert result == {
+        "error": "Classifier reached the output token limit after one larger retry",
+        "retryable": False,
+    }
+    assert stored.status == ComplianceSessionStatus.FAILED.value
+    assert stored.error_message == result["error"]
+    assert steps[-1].output_data["incomplete_reason"] == "max_output_tokens"
+    assert steps[-1].output_data["response_id"] == "response-2"
+    assert steps[-1].input_tokens == 200
+    assert steps[-1].output_tokens == 36_000
 
 
 async def test_agent_state_includes_steps_added_after_the_session_was_loaded(

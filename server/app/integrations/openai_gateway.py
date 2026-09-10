@@ -1,7 +1,7 @@
 """Typed OpenAI boundary for agent, classifier, and embedding calls."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
 from openai import AsyncOpenAI
@@ -14,12 +14,52 @@ class MissingAIConfigurationError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class AIResponseAttempt:
+    response_id: str
+    status: str
+    incomplete_reason: str | None
+    input_tokens: int | None
+    output_tokens: int | None
+    max_output_tokens: int
+    policy_count: int
+
+
+class IncompleteClassifierResponseError(RuntimeError):
+    def __init__(self, attempts: list[AIResponseAttempt]):
+        self.attempts = attempts
+        final_attempt = attempts[-1]
+        self.reason = final_attempt.incomplete_reason
+        self.response_id = final_attempt.response_id
+        self.input_tokens = sum(attempt.input_tokens or 0 for attempt in attempts)
+        self.output_tokens = sum(attempt.output_tokens or 0 for attempt in attempts)
+        if self.reason == "max_output_tokens":
+            message = "Classifier reached the output token limit after one larger retry"
+        elif self.reason == "content_filter":
+            message = "Classifier response was stopped by the content filter"
+        else:
+            message = "Classifier returned an incomplete response"
+        super().__init__(message)
+
+    def details(self) -> dict[str, Any]:
+        return {
+            "error": str(self),
+            "incomplete_reason": self.reason,
+            "response_id": self.response_id,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "attempts": [asdict(attempt) for attempt in self.attempts],
+        }
+
+
 @dataclass
 class ComplianceModelResult:
     output: ComplianceCheckOutput
     response_id: str
     input_tokens: int | None
     output_tokens: int | None
+    response_ids: list[str] = field(default_factory=list)
+    attempts: list[AIResponseAttempt] = field(default_factory=list)
 
 
 class AIGateway(Protocol):
@@ -54,7 +94,9 @@ class OpenAIGateway:
     def checker_cache_namespace(self) -> str:
         return (
             f"{self.settings.openai_checker_model}:"
-            f"full-policy-check-v7-{self.settings.openai_checker_reasoning_effort}"
+            f"full-policy-check-v8-{self.settings.openai_checker_reasoning_effort}-"
+            f"batch{self.settings.openai_checker_policy_batch_size}-"
+            f"out{self.settings.openai_checker_max_output_tokens}"
         )
 
     async def run_agent(
@@ -112,29 +154,64 @@ reason. The status and reason must agree. If the reason says required content is
 compliant, allowed, or not a violation, return no_violation. Do not mark a requirement as
 violated when the posting contains the required information.
 """.strip()
-        input_payload = {
-            "posting": posting,
-            "policies": policies,
-        }
-        response = await self.client.responses.parse(
-            model=self.settings.openai_checker_model,
-            instructions=instructions,
-            input=json.dumps(input_payload, default=str),
-            text_format=ComplianceCheckOutput,
-            reasoning={"effort": self.settings.openai_checker_reasoning_effort},
-            max_output_tokens=self.settings.openai_checker_max_output_tokens,
-            store=self.settings.openai_store_responses,
+        batch_size = self.settings.openai_checker_policy_batch_size
+        attempts: list[AIResponseAttempt] = []
+        response_ids: list[str] = []
+        outputs: list[ComplianceCheckOutput] = []
+        for start in range(0, len(policies), batch_size):
+            policy_batch = policies[start : start + batch_size]
+            response = None
+            for max_output_tokens in (
+                self.settings.openai_checker_max_output_tokens,
+                self.settings.openai_checker_max_output_tokens * 2,
+            ):
+                response = await self.client.responses.parse(
+                    model=self.settings.openai_checker_model,
+                    instructions=instructions,
+                    input=json.dumps({"posting": posting, "policies": policy_batch}, default=str),
+                    text_format=ComplianceCheckOutput,
+                    reasoning={"effort": self.settings.openai_checker_reasoning_effort},
+                    max_output_tokens=max_output_tokens,
+                    store=self.settings.openai_store_responses,
+                )
+                usage = response.usage
+                incomplete_details = getattr(response, "incomplete_details", None)
+                attempt = AIResponseAttempt(
+                    response_id=response.id,
+                    status=response.status,
+                    incomplete_reason=getattr(incomplete_details, "reason", None),
+                    input_tokens=getattr(usage, "input_tokens", None),
+                    output_tokens=getattr(usage, "output_tokens", None),
+                    max_output_tokens=max_output_tokens,
+                    policy_count=len(policy_batch),
+                )
+                attempts.append(attempt)
+                if response.status == "completed":
+                    break
+                if attempt.incomplete_reason != "max_output_tokens":
+                    raise IncompleteClassifierResponseError(attempts)
+            if response is None or response.status != "completed":
+                raise IncompleteClassifierResponseError(attempts)
+            if response.output_parsed is None:
+                raise ValueError("Classifier did not return a structured result")
+            response_ids.append(response.id)
+            outputs.append(response.output_parsed)
+
+        input_types = {output.input_type for output in outputs}
+        if len(input_types) != 1:
+            raise ValueError("Classifier returned inconsistent input types across policy batches")
+        combined_output = ComplianceCheckOutput(
+            input_type=outputs[0].input_type,
+            assessments=[assessment for output in outputs for assessment in output.assessments],
+            summary=" ".join(output.summary for output in outputs),
         )
-        if response.status != "completed":
-            raise RuntimeError(f"Classifier response ended with status {response.status}")
-        if response.output_parsed is None:
-            raise ValueError("Classifier did not return a structured result")
-        usage = response.usage
         return ComplianceModelResult(
-            output=response.output_parsed,
-            response_id=response.id,
-            input_tokens=getattr(usage, "input_tokens", None),
-            output_tokens=getattr(usage, "output_tokens", None),
+            output=combined_output,
+            response_id=response_ids[-1],
+            response_ids=response_ids,
+            input_tokens=sum(attempt.input_tokens or 0 for attempt in attempts),
+            output_tokens=sum(attempt.output_tokens or 0 for attempt in attempts),
+            attempts=attempts,
         )
 
     async def embed(self, texts: list[str]) -> list[list[float]]:

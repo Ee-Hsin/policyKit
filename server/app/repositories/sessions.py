@@ -269,7 +269,7 @@ async def record_revision_decision(
     db: AsyncSession,
     session: ComplianceSession,
     *,
-    approved: bool,
+    decisions: dict[str, bool],
     reviewer_name: str,
     notes: str | None,
 ) -> None:
@@ -279,24 +279,102 @@ async def record_revision_decision(
     ]
     if not pending:
         raise ValueError("This session has no proposed changes awaiting approval")
-    status = ChangeStatus.ACCEPTED.value if approved else ChangeStatus.REJECTED.value
+    pending_by_id = {change.id: change for change in pending}
+    if set(decisions) != set(pending_by_id):
+        raise ValueError("Choose accept or reject for every proposed change")
+
+    accepted = [change for change in pending if decisions[change.id]]
+    rejected = [change for change in pending if not decisions[change.id]]
     for change in pending:
-        change.status = status
+        change.status = (
+            ChangeStatus.ACCEPTED.value if decisions[change.id] else ChangeStatus.REJECTED.value
+        )
+
+    previous_ids = {change.from_posting_version_id for change in pending}
+    if len(previous_ids) != 1:
+        raise ValueError("Proposed changes do not share the same source posting")
+    previous_id = previous_ids.pop()
+    previous = await db.get(PostingVersion, previous_id)
+    if not previous:
+        raise ValueError("The source posting for these changes is unavailable")
+
     review = HumanReview(
         session_id=session.id,
         reviewer_name=reviewer_name,
-        decision="approve" if approved else "reject",
+        decision="approve" if not rejected else "reject" if not accepted else "partial",
         notes=notes,
     )
     db.add(review)
-    if approved:
+
+    if not rejected:
         session.current_posting_version.approved_at = utc_now()
-        session.status = ComplianceSessionStatus.QUEUED.value
+    elif accepted:
+        replacements = []
+        for change in accepted:
+            if previous.content.count(change.original_text) != 1:
+                raise ValueError("A proposed change no longer matches the source posting")
+            start = previous.content.index(change.original_text)
+            end = start + len(change.original_text)
+            if (
+                not change.replacement_text
+                and start > 0
+                and end < len(previous.content)
+                and previous.content[start - 1] == " "
+                and previous.content[end] == " "
+            ):
+                end += 1
+            replacements.append((start, end, change.replacement_text))
+        replacements.sort()
+        revised_parts = []
+        cursor = 0
+        for start, end, replacement in replacements:
+            revised_parts.extend((previous.content[cursor:start], replacement))
+            cursor = end
+        revised_parts.append(previous.content[cursor:])
+        latest_version_number = (
+            await db.scalar(
+                select(func.max(PostingVersion.version)).where(
+                    PostingVersion.posting_id == session.posting_id
+                )
+            )
+            or 0
+        )
+        selected_revision = PostingVersion(
+            posting_id=session.posting_id,
+            version=latest_version_number + 1,
+            content="".join(revised_parts),
+            source="agent",
+            approved_at=utc_now(),
+        )
+        db.add(selected_revision)
+        await db.flush()
+        for change in accepted:
+            change.to_posting_version_id = selected_revision.id
+        session.current_posting_version_id = selected_revision.id
+        session.current_posting_version = selected_revision
     else:
-        previous_id = pending[0].from_posting_version_id
         session.current_posting_version_id = previous_id
-        session.status = ComplianceSessionStatus.WAITING_FOR_INFORMATION.value
-        session.current_question = "What should the agent change about the proposed revision?"
+        session.current_posting_version = previous
+
+    if rejected:
+        await add_step(
+            db,
+            session.id,
+            kind="user_message",
+            name="Recruiter reviewed proposed changes",
+            input_data={
+                "rejected_changes": [
+                    {
+                        "original_text": change.original_text,
+                        "replacement_text": change.replacement_text,
+                    }
+                    for change in rejected
+                ],
+                "notes": notes,
+            },
+        )
+    session.current_question = None
+    session.status = ComplianceSessionStatus.QUEUED.value
     await db.commit()
 
 

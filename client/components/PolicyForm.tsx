@@ -2,8 +2,8 @@
 
 import { FormEvent, useState } from "react";
 import { JurisdictionSelect } from "@/components/JurisdictionSelect";
-import { PanelIcon } from "@/components/PanelIcon";
 import type {
+  PolicyCategory,
   PolicyCreateInput,
   PolicyDraftInput,
   PolicyVersionFields,
@@ -35,24 +35,41 @@ function textToList(value: string) {
     .filter(Boolean);
 }
 
-function toLocalDate(value: string | null) {
+function toDateInput(value: string | null) {
   if (!value) return "";
   const date = new Date(value);
   const offset = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+  return new Date(date.getTime() - offset).toISOString().slice(0, 10);
 }
 
 function toApiDate(value: string) {
-  return value ? new Date(value).toISOString() : null;
+  return value ? new Date(`${value}T00:00:00`).toISOString() : null;
 }
+
+const employmentOptions = [
+  ["full_time", "Full-time"],
+  ["part_time", "Part-time"],
+  ["contract", "Contract"],
+  ["temporary", "Temporary"],
+  ["internship", "Internship"],
+] as const;
+
+const policyCategories: PolicyCategory[] = [
+  "Discrimination",
+  "Compensation",
+  "Employment status",
+  "Transparency",
+  "Content",
+];
 
 interface PolicyFormProps {
   initial?: Partial<PolicyVersionFields>;
   initialTitle?: string;
-  initialCategory?: string;
+  initialCategory?: PolicyCategory | "";
   policyKey?: string;
   create?: boolean;
   submitting?: boolean;
+  formId?: string;
   submitLabel: string;
   onSubmit: (input: PolicyCreateInput | PolicyDraftInput) => Promise<void>;
 }
@@ -64,22 +81,20 @@ export function PolicyForm({
   policyKey = "",
   create = false,
   submitting = false,
+  formId,
   submitLabel,
   onSubmit,
 }: PolicyFormProps) {
   const values = { ...emptyFields, ...initial };
   const [key, setKey] = useState(policyKey);
   const [title, setTitle] = useState(initialTitle);
-  const [category, setCategory] = useState(initialCategory);
+  const [category, setCategory] = useState<PolicyCategory | "">(initialCategory);
   const [ruleText, setRuleText] = useState(values.rule_text);
   const [rationale, setRationale] = useState(values.rationale ?? "");
   const [remediation, setRemediation] = useState(values.remediation ?? "");
   const [enforcement, setEnforcement] = useState(values.enforcement_level);
   const [jurisdictions, setJurisdictions] = useState(values.jurisdictions);
-  const [employmentTypes, setEmploymentTypes] = useState(
-    listToText(values.employment_types),
-  );
-  const [platforms, setPlatforms] = useState(listToText(values.platforms));
+  const [employmentTypes, setEmploymentTypes] = useState(values.employment_types);
   const [violationExamples, setViolationExamples] = useState(
     listToText(values.violation_examples),
   );
@@ -88,22 +103,22 @@ export function PolicyForm({
   );
   const [exceptions, setExceptions] = useState(listToText(values.exceptions));
   const [effectiveAt, setEffectiveAt] = useState(
-    toLocalDate(values.effective_at),
+    toDateInput(values.effective_at),
   );
-  const [expiresAt, setExpiresAt] = useState(toLocalDate(values.expires_at));
+  const [expiresAt, setExpiresAt] = useState(toDateInput(values.expires_at));
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     const fields: PolicyDraftInput = {
       title,
-      category,
+      category: category || undefined,
       rule_text: ruleText,
       rationale: rationale || null,
       remediation: remediation || null,
       enforcement_level: enforcement,
       jurisdictions,
-      employment_types: textToList(employmentTypes),
-      platforms: textToList(platforms),
+      employment_types: employmentTypes,
+      platforms: values.platforms,
       violation_examples: textToList(violationExamples),
       compliant_examples: textToList(compliantExamples),
       exceptions: textToList(exceptions),
@@ -114,32 +129,26 @@ export function PolicyForm({
   }
 
   return (
-    <form className="policy-form" onSubmit={submit}>
-      <section className="admin-card">
-        <div className="admin-card__heading">
-          <PanelIcon kind="identity" />
-          <div>
-            <p className="kicker">Identity</p>
-            <h2>Name this policy</h2>
-          </div>
-        </div>
-        <div className="form-grid form-grid--three">
-          <label className="field">
-            <span>Policy key</span>
-            <input
-              required
-              disabled={!create}
-              minLength={3}
-              maxLength={80}
-              pattern="[A-Z0-9][A-Z0-9_-]{2,79}"
-              value={key}
-              onChange={(event) =>
-                setKey(event.target.value.toUpperCase().replaceAll(" ", "_"))
-              }
-              placeholder="NY-PAY-001"
-            />
-            <small>Stable across all versions.</small>
-          </label>
+    <form className="policy-form policy-form-surface" id={formId} onSubmit={submit}>
+      <section className="policy-form-section">
+        <h2>Policy details</h2>
+        <div className={`form-grid ${create ? "form-grid--three" : "form-grid--two"}`}>
+          {create ? (
+            <label className="field">
+              <span>Policy key</span>
+              <input
+                required
+                minLength={3}
+                maxLength={80}
+                pattern="[A-Z0-9][A-Z0-9_-]{2,79}"
+                value={key}
+                onChange={(event) =>
+                  setKey(event.target.value.toUpperCase().replaceAll(" ", "_"))
+                }
+                placeholder="NY-PAY-001"
+              />
+            </label>
+          ) : null}
           <label className="field">
             <span>Title</span>
             <input
@@ -153,26 +162,28 @@ export function PolicyForm({
           </label>
           <label className="field">
             <span>Category</span>
-            <input
+            <select
               required
-              minLength={2}
-              maxLength={80}
               value={category}
-              onChange={(event) => setCategory(event.target.value)}
-              placeholder="Compensation"
-            />
+              onChange={(event) =>
+                setCategory(event.target.value as PolicyCategory | "")
+              }
+            >
+              <option disabled value="">
+                Select category
+              </option>
+              {policyCategories.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           </label>
         </div>
       </section>
 
-      <section className="admin-card">
-        <div className="admin-card__heading">
-          <PanelIcon kind="rule" />
-          <div>
-            <p className="kicker">Decision standard</p>
-            <h2>Define the rule</h2>
-          </div>
-        </div>
+      <section className="policy-form-section">
+        <h2>Rule</h2>
         <label className="field">
           <span>Policy rule</span>
           <textarea
@@ -184,110 +195,74 @@ export function PolicyForm({
             placeholder="State the requirement in precise, testable language…"
           />
         </label>
-        <div className="form-grid form-grid--two">
-          <label className="field">
-            <span>
-              Rationale <em>Optional</em>
-            </span>
-            <textarea
-              value={rationale}
-              onChange={(event) => setRationale(event.target.value)}
-              placeholder="Why this policy exists…"
-            />
-          </label>
-          <label className="field">
-            <span>
-              Recommended remediation <em>Optional</em>
-            </span>
-            <textarea
-              value={remediation}
-              onChange={(event) => setRemediation(event.target.value)}
-              placeholder="How the agent should resolve a violation…"
-            />
-          </label>
-        </div>
       </section>
 
-      <section className="admin-card">
-        <div className="admin-card__heading">
-          <PanelIcon kind="scope" />
-          <div>
-            <p className="kicker">Scope</p>
-            <h2>Set where it applies</h2>
-          </div>
-        </div>
-        <div className="form-grid form-grid--three">
+      <section className="policy-form-section">
+        <h2>Applies to</h2>
+        <div className="form-grid form-grid--two">
           <JurisdictionSelect
             includeGlobal
             label="Jurisdictions"
             value={jurisdictions}
             onChange={setJurisdictions}
           />
-          <label className="field">
-            <span>
-              Employment types <em>Optional</em>
-            </span>
-            <textarea
-              value={employmentTypes}
-              onChange={(event) => setEmploymentTypes(event.target.value)}
-              placeholder={"full_time\ncontract"}
-            />
-            <small>Empty means all employment types.</small>
-          </label>
-          <label className="field">
-            <span>
-              Platforms <em>Optional</em>
-            </span>
-            <textarea
-              value={platforms}
-              onChange={(event) => setPlatforms(event.target.value)}
-              placeholder="policykit"
-            />
-            <small>Empty means all platforms.</small>
-          </label>
-          <label className="field">
-            <span>Enforcement level</span>
-            <select
-              value={enforcement}
-              onChange={(event) => setEnforcement(event.target.value)}
-            >
-              <option value="standard">Standard</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>
-              Effective at <em>Optional</em>
-            </span>
-            <input
-              type="datetime-local"
-              value={effectiveAt}
-              onChange={(event) => setEffectiveAt(event.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span>
-              Expires at <em>Optional</em>
-            </span>
-            <input
-              type="datetime-local"
-              value={expiresAt}
-              onChange={(event) => setExpiresAt(event.target.value)}
-            />
-          </label>
+          <fieldset className="compact-check-field">
+            <legend>Employment types <em>Optional</em></legend>
+            <div>
+              {employmentOptions.map(([value, label]) => (
+                <label key={value}>
+                  <input
+                    checked={employmentTypes.includes(value)}
+                    onChange={(event) => setEmploymentTypes((current) =>
+                      event.target.checked
+                        ? [...current, value]
+                        : current.filter((item) => item !== value),
+                    )}
+                    type="checkbox"
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+            <small>No selection means all employment types.</small>
+          </fieldset>
         </div>
       </section>
 
-      <section className="admin-card">
-        <div className="admin-card__heading">
-          <PanelIcon kind="guidance" />
-          <div>
-            <p className="kicker">Guidance</p>
-            <h2>Add examples and exceptions</h2>
+      <details className="policy-options">
+        <summary>More options</summary>
+        <div className="policy-options__content">
+          <div className="form-grid form-grid--two">
+            <label className="field">
+              <span>Rationale <em>Optional</em></span>
+              <textarea value={rationale} onChange={(event) => setRationale(event.target.value)} placeholder="Why this policy exists…" />
+            </label>
+            <label className="field">
+              <span>Recommended remediation <em>Optional</em></span>
+              <textarea value={remediation} onChange={(event) => setRemediation(event.target.value)} placeholder="How to resolve a violation…" />
+            </label>
           </div>
-        </div>
-        <div className="form-grid form-grid--three">
+
+          <div className="form-grid form-grid--three">
+            <label className="field">
+              <span>Enforcement level</span>
+              <select value={enforcement} onChange={(event) => setEnforcement(event.target.value)}>
+                <option value="standard">Standard</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Effective date <em>Optional</em></span>
+              <input type="date" value={effectiveAt} onChange={(event) => setEffectiveAt(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>Expiry date <em>Optional</em></span>
+              <input type="date" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} />
+            </label>
+          </div>
+
+          <div className="form-grid form-grid--three">
           <label className="field">
             <span>Violation examples</span>
             <textarea
@@ -315,21 +290,13 @@ export function PolicyForm({
             />
             <small>One exception per line.</small>
           </label>
+          </div>
         </div>
-      </section>
+      </details>
 
-      <div className="sticky-actions">
-        <div>
-          <strong>{create ? "Create as draft" : "Save draft changes"}</strong>
-          <p>Published versions remain immutable.</p>
-        </div>
-        <button
-          className="button button--primary button--large"
-          disabled={submitting}
-        >
-          {submitting ? "Saving…" : submitLabel}
-        </button>
-      </div>
+      <button className="sr-only" disabled={submitting} type="submit">
+        {submitting ? "Saving…" : submitLabel}
+      </button>
     </form>
   );
 }

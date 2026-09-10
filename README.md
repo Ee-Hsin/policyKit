@@ -22,10 +22,12 @@ PolicyKit then:
 5. Validates full policy coverage and every quoted evidence offset in Python.
 6. Asks one focused question when required information is missing.
 7. Builds any proposed revision from declared edits on the server.
-8. Waits for recruiter approval, then checks the approved revision again.
-9. Re-runs the deterministic publication gate before recording publication.
+8. Keeps the original flagged text visible while the recruiter accepts or rejects each edit.
+9. Builds a draft from the accepted edits and checks that draft again. Rejected edits return
+   to the agent as feedback.
+10. Re-runs the deterministic publication gate before recording publication.
 
-![A proposed revision waiting for recruiter approval](docs/images/policykit-review.png)
+![Flagged text, proposed edits, and individual review decisions](docs/images/policykit-review.png)
 
 ## System architecture
 
@@ -81,8 +83,7 @@ stateDiagram-v2
     investigating --> waiting_for_information: Required fact is missing
     waiting_for_information --> queued: Recruiter answers
     investigating --> waiting_for_approval: Agent proposes exact edits
-    waiting_for_approval --> queued: Recruiter approves revision
-    waiting_for_approval --> waiting_for_information: Recruiter requests changes
+    waiting_for_approval --> queued: Recruiter submits edit decisions
     investigating --> needs_review: Policy judgment is ambiguous
     needs_review --> ready_to_publish: Reviewer resolves findings
     investigating --> ready_to_publish: Complete clean check
@@ -112,10 +113,13 @@ publication and human-review decisions so stale writes cannot change history.
 ## Policy administration
 
 An administrator can create, test, version, and publish policies from the web interface.
-A policy includes its canonical scope, enforcement level, rule, remediation, exceptions,
-and both violation and compliant examples.
+A policy includes its category, canonical scope, enforcement level, rule, remediation,
+exceptions, and both violation and compliant examples. Category is restricted to
+`Discrimination`, `Compensation`, `Employment status`, `Transparency`, or `Content`.
 
 ![Versioned policies and Chroma index status](docs/images/policykit-policy-library.png)
+
+![The compact policy editor](docs/images/policykit-policy-editor.png)
 
 Publishing a version retires the prior live version and creates a new immutable snapshot.
 Sessions already in progress keep their original snapshot. Policy and location inputs are
@@ -220,6 +224,8 @@ The complete template is in [`.env.example`](.env.example). Important settings i
 | `OPENAI_AGENT_MODEL` | `gpt-5.4-mini` | Chooses the next allowed tool |
 | `OPENAI_CHECKER_MODEL` | `gpt-5.4-mini` | Produces typed per-policy assessments |
 | `OPENAI_CHECKER_REASONING_EFFORT` | `medium` | Checker reasoning level |
+| `OPENAI_CHECKER_MAX_OUTPUT_TOKENS` | `12000` | Initial output limit for each policy batch |
+| `OPENAI_CHECKER_POLICY_BATCH_SIZE` | `4` | Policies assessed per structured model response |
 | `OPENAI_STORE_RESPONSES` | `false` | OpenAI response-storage choice |
 | `CHROMA_MODE` | `persistent` | `persistent`, `http`, or `disabled` |
 | `RUN_AGENT_WORKER` | `true` | Runs the queue worker with FastAPI |

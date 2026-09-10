@@ -38,8 +38,17 @@ export interface Finding {
   resolved: boolean;
 }
 
+export type PolicyCategory =
+  | "Discrimination"
+  | "Compensation"
+  | "Employment status"
+  | "Transparency"
+  | "Content";
+
 export interface ProposedChange {
   id: string;
+  from_posting_version_id: string;
+  to_posting_version_id: string;
   original_text: string;
   replacement_text: string;
   reason: string;
@@ -108,7 +117,7 @@ export interface PolicySummary {
   id: string;
   key: string;
   title: string;
-  category: string;
+  category: PolicyCategory;
   current_version: number;
   status: string;
   index_status: string;
@@ -120,17 +129,17 @@ export interface PolicyDetail {
   id: string;
   key: string;
   title: string;
-  category: string;
+  category: PolicyCategory;
   versions: PolicyVersion[];
 }
 
 export interface PolicyDraftInput extends PolicyVersionFields {
   title?: string;
-  category?: string;
+  category?: PolicyCategory;
 }
 
 export interface PolicyCreateInput extends PolicyVersionFields {
   key: string;
   title: string;
-  category: string;
+  category: PolicyCategory;
 }

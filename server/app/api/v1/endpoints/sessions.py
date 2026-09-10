@@ -28,10 +28,23 @@ router = APIRouter()
 
 
 async def session_response(db: AsyncSession, session: ComplianceSession) -> ComplianceSessionRead:
-    findings = await repository.findings_for_session(
-        db, session.id, posting_version_id=session.current_posting_version_id
-    )
     changes = await repository.proposed_changes_for_session(db, session.id)
+    finding_posting_version_id = session.current_posting_version_id
+    if session.status == ComplianceSessionStatus.WAITING_FOR_APPROVAL.value:
+        pending_change = next(
+            (
+                change
+                for change in changes
+                if change.status == "proposed"
+                and change.to_posting_version_id == session.current_posting_version_id
+            ),
+            None,
+        )
+        if pending_change:
+            finding_posting_version_id = pending_change.from_posting_version_id
+    findings = await repository.findings_for_session(
+        db, session.id, posting_version_id=finding_posting_version_id
+    )
     steps = await repository.steps_for_session(db, session.id)
     return ComplianceSessionRead(
         id=session.id,
@@ -153,7 +166,7 @@ async def approve_revision(
         await repository.record_revision_decision(
             db,
             session,
-            approved=request.approved,
+            decisions={decision.change_id: decision.approved for decision in request.decisions},
             reviewer_name=request.reviewer_name,
             notes=request.notes,
         )

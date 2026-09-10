@@ -31,8 +31,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let message = "PolicyKit could not complete the request.";
     try {
-      const payload = (await response.json()) as { detail?: string };
-      if (payload.detail) message = payload.detail;
+      const payload = (await response.json()) as {
+        detail?: string | Array<{ loc?: Array<string | number>; msg?: string }>;
+      };
+      if (typeof payload.detail === "string") {
+        message = payload.detail;
+      } else if (Array.isArray(payload.detail)) {
+        message = payload.detail
+          .map((item) => {
+            const field = item.loc?.at(-1);
+            return [field, item.msg].filter(Boolean).join(": ");
+          })
+          .filter(Boolean)
+          .join(" ");
+      }
     } catch {
       // The fallback message is clear when the API does not return JSON.
     }
@@ -67,10 +79,14 @@ export function answerSession(id: string, message: string) {
   });
 }
 
-export function approveRevision(id: string, approved: boolean, notes?: string) {
+export function approveRevision(
+  id: string,
+  decisions: { change_id: string; approved: boolean }[],
+  notes?: string,
+) {
   return request<ComplianceSession>(`/compliance-sessions/${id}/approve`, {
     method: "POST",
-    body: JSON.stringify({ approved, reviewer_name: "Demo recruiter", notes: notes || null }),
+    body: JSON.stringify({ decisions, reviewer_name: "Demo recruiter", notes: notes || null }),
   });
 }
 
