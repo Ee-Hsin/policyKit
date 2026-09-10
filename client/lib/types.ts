@@ -6,7 +6,7 @@ export type SessionStatus =
   | "changes_proposed"
   | "waiting_for_approval"
   | "ready_to_publish"
-  | "needs_review"
+  | "review_complete"
   | "published"
   | "failed";
 
@@ -35,7 +35,6 @@ export interface Finding {
   evidence_end: number | null;
   reason: string;
   confidence: number | null;
-  resolved: boolean;
 }
 
 export type PolicyCategory =
@@ -107,7 +106,6 @@ export interface PolicyVersion extends PolicyVersionFields {
   id: string;
   version: number;
   status: "draft" | "testing" | "published" | "retired";
-  index_status: "pending" | "indexed" | "failed";
   published_at: string | null;
   created_at: string;
   updated_at: string;
@@ -120,7 +118,6 @@ export interface PolicySummary {
   category: PolicyCategory;
   current_version: number;
   status: string;
-  index_status: string;
   jurisdictions: string[];
   updated_at: string;
 }

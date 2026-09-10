@@ -26,9 +26,7 @@ const runningStatuses = new Set<SessionStatus>([
 const activityLabels: Record<string, string> = {
   "Agent selected its next action": "Selected the next review step",
   "Checked all applicable policies": "Compared the posting with every applicable policy",
-  search_policies: "Reviewed the policies behind a finding",
   read_policy: "Read the full policy text",
-  search_reviewed_precedents: "Checked similar reviewed cases",
   propose_revision: "Prepared focused changes for your review",
   "Recruiter reviewed proposed changes": "Applied your edit decisions",
   "Recruiter answered": "Added the recruiter information",
@@ -191,7 +189,7 @@ function ReviewPanel({
   const canOverridePublication = ([
     "waiting_for_information",
     "waiting_for_approval",
-    "needs_review",
+    "review_complete",
     "failed",
   ] as SessionStatus[]).includes(session.status);
   const reviewStarted = (["investigating", "changes_proposed"] as SessionStatus[])
@@ -296,10 +294,10 @@ function ReviewPanel({
         </section>
       ) : null}
 
-      {session.status === "needs_review" || session.status === "failed" ? (
+      {session.status === "review_complete" || session.status === "failed" ? (
         <section className="review-action review-action--warning">
-          <h2>{session.status === "failed" ? "Review stopped" : "Human review required"}</h2>
-          <p>{session.error_message ?? "The review needs a decision from a person."}</p>
+          <h2>{session.status === "failed" ? "Review stopped" : "Review complete"}</h2>
+          <p>{session.error_message ?? (session.status === "failed" ? "The review could not finish." : "Unresolved findings remain. Review them below or publish with an explanation.")}</p>
         </section>
       ) : null}
 
@@ -477,7 +475,6 @@ export default function SessionPage() {
               : null,
             reason: change.reason,
             confidence: null,
-            resolved: false,
           },
         ] as const),
       ),

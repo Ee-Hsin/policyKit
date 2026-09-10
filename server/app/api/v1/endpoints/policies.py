@@ -7,9 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.integrations.chroma import ChromaIndex
 from app.integrations.openai_gateway import MissingAIConfigurationError, OpenAIGateway
-from app.models.entities import IndexStatus, Policy
+from app.models.entities import Policy
 from app.repositories import policies as repository
 from app.schemas.policies import (
     PolicyCreate,
@@ -51,7 +50,6 @@ def policy_summary(policy: Policy) -> PolicySummary:
         category=current.category,
         current_version=current.version,
         status=current.status,
-        index_status=current.index_status,
         jurisdictions=current.jurisdictions,
         updated_at=current.updated_at,
     )
@@ -150,17 +148,7 @@ async def publish_policy_version(
     except (repository.PolicyStateError, repository.PolicyNotFoundError) as error:
         raise handle_repository_error(error) from error
 
-    version = next(item for item in policy.versions if item.id == version_id)
-    try:
-        ai = OpenAIGateway(get_settings())
-        await ChromaIndex(get_settings(), ai).index_policy(version)
-        version.index_status = IndexStatus.INDEXED.value
-    except Exception:
-        version.index_status = IndexStatus.FAILED.value
-    await db.commit()
-    policy = await repository.get_policy(db, policy_id)
     return PublishPolicyResponse(
         policy=policy_detail(policy),
         snapshot_version=snapshot.version,
-        index_status=version.index_status,
     )

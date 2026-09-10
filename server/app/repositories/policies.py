@@ -8,7 +8,6 @@ from sqlalchemy.orm import selectinload
 
 from app.core.time import utc_now
 from app.models.entities import (
-    IndexStatus,
     Policy,
     PolicySnapshot,
     PolicySnapshotItem,
@@ -181,8 +180,6 @@ async def publish_policy_version(
     version.published_at = now
     version.effective_at = effective_at
     version.expires_at = expires_at
-    version.index_status = IndexStatus.PENDING.value
-
     next_snapshot_version = (await db.scalar(select(func.max(PolicySnapshot.version))) or 0) + 1
     snapshot = PolicySnapshot(version=next_snapshot_version)
     db.add(snapshot)

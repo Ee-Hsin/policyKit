@@ -1,4 +1,4 @@
-"""Typed OpenAI boundary for agent, classifier, and embedding calls."""
+"""Typed LLM boundary for agent and classifier calls."""
 
 import json
 from dataclasses import asdict, dataclass, field
@@ -73,8 +73,6 @@ class AIGateway(Protocol):
     async def check_compliance(
         self, *, posting: str, policies: list[dict[str, Any]]
     ) -> ComplianceModelResult: ...
-
-    async def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
 class OpenAIGateway:
@@ -213,11 +211,3 @@ violated when the posting contains the required information.
             output_tokens=sum(attempt.output_tokens or 0 for attempt in attempts),
             attempts=attempts,
         )
-
-    async def embed(self, texts: list[str]) -> list[list[float]]:
-        response = await self.client.embeddings.create(
-            model=self.settings.openai_embedding_model,
-            input=texts,
-            encoding_format="float",
-        )
-        return [item.embedding for item in response.data]

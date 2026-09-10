@@ -1,12 +1,11 @@
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.runtime import AgentToolError, AgentToolExecutor, ComplianceAgent, build_agent_state
 from app.core.config import Settings
-from app.integrations.chroma import SemanticMatch
 from app.integrations.openai_gateway import (
     AIResponseAttempt,
     IncompleteClassifierResponseError,
@@ -28,7 +27,7 @@ from app.repositories import sessions as session_repository
 from app.schemas.ai import AgentTurn, ComplianceCheckOutput, PolicyAssessment
 from app.schemas.sessions import ComplianceSessionCreate
 from app.services.compliance_checker import run_compliance_check
-from tests.fakes import FakeAI, FakeIndex
+from tests.fakes import FakeAI
 
 
 async def policy_snapshot(db: AsyncSession, *, count: int = 2) -> PolicySnapshot:
@@ -167,7 +166,6 @@ async def test_executor_rejects_a_tool_not_offered_for_the_current_state(
         db,
         session,
         FakeAI(),
-        FakeIndex(),
         allowed_tool_names={"run_compliance_check"},
     )
 
@@ -219,7 +217,6 @@ async def test_incomplete_classifier_response_stops_without_another_agent_retry(
         db,
         session,
         ai,
-        FakeIndex(),
         allowed_tool_names={"run_compliance_check"},
     )
 
@@ -269,7 +266,7 @@ async def test_completion_rejects_missing_or_unresolved_policy_assessments(
 ) -> None:
     snapshot = await policy_snapshot(db)
     session = await compliance_session(db, snapshot)
-    executor = AgentToolExecutor(db, session, FakeAI(), FakeIndex())
+    executor = AgentToolExecutor(db, session, FakeAI())
     first_policy_id = snapshot.items[0].policy_version_id
 
     incomplete = await executor.execute("complete_session", {"summary": "Ready to publish"})
@@ -303,7 +300,7 @@ async def test_completion_rejects_an_unapproved_agent_revision(db: AsyncSession)
     session.current_posting_version.source = "agent"
     session.current_posting_version.approved_at = None
     await db.commit()
-    executor = AgentToolExecutor(db, session, FakeAI(), FakeIndex())
+    executor = AgentToolExecutor(db, session, FakeAI())
 
     result = await executor.execute("complete_session", {"summary": "Ready to publish"})
 
@@ -329,7 +326,7 @@ async def test_completion_uses_the_session_start_time_for_an_expiring_policy(
         "utc_now",
         lambda: session.created_at + timedelta(days=1),
     )
-    executor = AgentToolExecutor(db, session, ai, FakeIndex())
+    executor = AgentToolExecutor(db, session, ai)
 
     result = await executor.execute("complete_session", {"summary": "Ready to publish"})
 
@@ -361,7 +358,7 @@ async def test_completion_rejects_findings_from_a_previous_location_scope(
     session = await compliance_session(db, snapshot)
     ai = FakeAI(output_factory=output_factory({}))
     await run_compliance_check(db, session, ai)
-    executor = AgentToolExecutor(db, session, ai, FakeIndex())
+    executor = AgentToolExecutor(db, session, ai)
 
     await executor.execute("set_hiring_locations", {"locations": ["California"]})
     result = await executor.execute("complete_session", {"summary": "Ready to publish"})
@@ -381,7 +378,7 @@ async def test_revision_is_reconstructed_from_declared_changes(db: AsyncSession)
         cache_namespace="fake-revision-checker",
     )
     await run_compliance_check(db, session, ai)
-    executor = AgentToolExecutor(db, session, ai, FakeIndex())
+    executor = AgentToolExecutor(db, session, ai)
 
     result = await executor.execute(
         "propose_revision",
@@ -420,7 +417,7 @@ async def test_revision_accepts_a_declared_sentence_deletion_without_double_spac
         cache_namespace="fake-deletion-checker",
     )
     await run_compliance_check(db, session, ai)
-    executor = AgentToolExecutor(db, session, ai, FakeIndex())
+    executor = AgentToolExecutor(db, session, ai)
 
     result = await executor.execute(
         "propose_revision",
@@ -439,111 +436,48 @@ async def test_revision_accepts_a_declared_sentence_deletion_without_double_spac
     assert result["status"] == ComplianceSessionStatus.WAITING_FOR_APPROVAL.value
 
 
-async def test_human_approval_records_and_resolves_reviewed_findings(
-    db: AsyncSession,
-) -> None:
+async def test_agent_can_finish_with_unresolved_findings(db: AsyncSession) -> None:
     snapshot = await policy_snapshot(db, count=1)
     session = await compliance_session(db, snapshot)
     policy_id = snapshot.items[0].policy_version_id
     ai = FakeAI(
         output_factory=output_factory({policy_id: FindingStatus.VIOLATION}),
-        cache_namespace="fake-human-review-checker",
+        cache_namespace="fake-finding-checker",
     )
     await run_compliance_check(db, session, ai)
-    session.status = ComplianceSessionStatus.NEEDS_REVIEW.value
-    await db.commit()
+    executor = AgentToolExecutor(db, session, ai)
 
-    review = await session_repository.add_human_review(
-        db,
-        session,
-        reviewer_name="Policy reviewer",
-        decision="approve",
-        notes="Approved as an explicit policy exception.",
+    result = await executor.execute(
+        "finish_with_findings",
+        {"summary": "A recruiter decision is required.", "policy_keys": ["POLICY_001"]},
     )
 
     stored = await session_repository.get_session(db, session.id)
-    findings = await session_repository.findings_for_session(
-        db,
-        session.id,
-        posting_version_id=session.current_posting_version_id,
-    )
-    assert stored.status == ComplianceSessionStatus.READY_TO_PUBLISH.value
-    assert review.finding_ids == [findings[0].id]
-    assert findings[0].resolved is True
+    assert result["status"] == ComplianceSessionStatus.REVIEW_COMPLETE.value
+    assert stored.status == ComplianceSessionStatus.REVIEW_COMPLETE.value
+    assert stored.completed_at is not None
 
 
-async def test_human_review_rechecks_status_inside_the_write_transaction(
-    db: AsyncSession,
-) -> None:
+async def test_finish_with_findings_rejects_incomplete_policy_keys(db: AsyncSession) -> None:
     snapshot = await policy_snapshot(db, count=1)
     session = await compliance_session(db, snapshot)
-    session.status = ComplianceSessionStatus.NEEDS_REVIEW.value
-    await db.commit()
-    await db.execute(
-        update(type(session))
-        .where(type(session).id == session.id)
-        .values(status=ComplianceSessionStatus.FAILED.value)
-        .execution_options(synchronize_session=False)
+    policy_id = snapshot.items[0].policy_version_id
+    ai = FakeAI(
+        output_factory=output_factory({policy_id: FindingStatus.VIOLATION}),
+        cache_namespace="fake-finding-key-checker",
     )
-    await db.commit()
-
-    with pytest.raises(ValueError, match="does not require human review"):
-        await session_repository.add_human_review(
-            db,
-            session,
-            reviewer_name="Stale reviewer",
-            decision="approve",
-            notes=None,
-        )
-
-
-async def test_policy_search_uses_pinned_canonical_policy_text(
-    db: AsyncSession,
-) -> None:
-    snapshot = await policy_snapshot(db, count=1)
-    session = await compliance_session(db, snapshot)
-    pinned_snapshot = await policy_repository.get_snapshot(db, snapshot.id)
-    pinned_version = pinned_snapshot.items[0].policy_version
-    index = FakeIndex(
-        matches=[
-            SemanticMatch(
-                record_id="newer-result",
-                text="A newer policy outside the snapshot.",
-                distance=0.01,
-                metadata={"policy_version_id": "not-in-the-snapshot"},
-            ),
-            SemanticMatch(
-                record_id=pinned_version.id,
-                text="Stale vector-store text that must not be trusted.",
-                distance=0.02,
-                metadata={"policy_version_id": pinned_version.id},
-            ),
-        ]
-    )
-    executor = AgentToolExecutor(db, session, FakeAI(), index)
+    await run_compliance_check(db, session, ai)
+    executor = AgentToolExecutor(db, session, ai)
 
     result = await executor.execute(
-        "search_policies",
-        {"query": "policy rule", "category": "Content", "jurisdiction": None},
+        "finish_with_findings",
+        {"summary": "A recruiter decision is required.", "policy_keys": []},
     )
 
-    assert result["matches"] == [
-        {
-            "policy_key": "POLICY_001",
-            "title": "Policy 1",
-            "category": "content",
-            "passage": pinned_version.rule_text,
-            "distance": 0.02,
-        }
-    ]
-    assert index.search_calls == [
-        {
-            "collection_name": "policy_chunks",
-            "query": "policy rule",
-            "limit": 15,
-            "where": {"category": "content"},
-        }
-    ]
+    assert result == {
+        "error": "Policy keys must match every current unresolved finding",
+        "retryable": True,
+    }
 
 
 async def test_agent_rejects_a_turn_without_a_tool_call(db: AsyncSession) -> None:
@@ -553,11 +487,9 @@ async def test_agent_rejects_a_turn_without_a_tool_call(db: AsyncSession) -> Non
     agent = ComplianceAgent(
         Settings(
             database_url="sqlite+aiosqlite://",
-            chroma_mode="disabled",
             run_agent_worker=False,
         ),
         ai,
-        FakeIndex(),
     )
 
     with pytest.raises(AgentToolError, match="must select exactly one available tool"):
@@ -574,7 +506,7 @@ async def test_agent_rejects_a_turn_without_a_tool_call(db: AsyncSession) -> Non
     assert supplied_tool_names == {"run_compliance_check"}
 
 
-async def test_agent_escalates_when_it_reaches_the_iteration_limit(
+async def test_agent_fails_when_it_reaches_the_iteration_limit(
     db: AsyncSession,
 ) -> None:
     snapshot = await policy_snapshot(db)
@@ -585,17 +517,15 @@ async def test_agent_escalates_when_it_reaches_the_iteration_limit(
     agent = ComplianceAgent(
         Settings(
             database_url="sqlite+aiosqlite://",
-            chroma_mode="disabled",
             run_agent_worker=False,
             agent_max_steps=2,
         ),
         ai,
-        FakeIndex(),
     )
 
     await agent.run(db, session.id)
 
     stored = await session_repository.get_session(db, session.id)
-    assert stored.status == ComplianceSessionStatus.NEEDS_REVIEW.value
+    assert stored.status == ComplianceSessionStatus.FAILED.value
     assert stored.error_message == "The agent reached its investigation step limit."
     assert ai.agent_calls == []

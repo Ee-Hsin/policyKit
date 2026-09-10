@@ -2,19 +2,17 @@
 
 ## Trust boundary
 
-The Next.js application communicates only with FastAPI. OpenAI never has direct access to
-PostgreSQL, ChromaDB, the filesystem, human approval, or publication. The Python runtime
+The Next.js application communicates only with FastAPI. The LLM never has direct access
+to PostgreSQL, the filesystem, recruiter decisions, or publication. The Python runtime
 validates each model-requested tool against the current session state.
 
 ```mermaid
 flowchart TB
     subgraph client["User boundary"]
         recruiter["Recruiter"]
-        reviewer["Human reviewer"]
         admin["Policy administrator"]
         next["Next.js"]
         recruiter --> next
-        reviewer --> next
         admin --> next
     end
 
@@ -24,30 +22,25 @@ flowchart TB
         runtime["Agent runtime and state machine"]
         gate["Deterministic validation and publication gate"]
         db[("PostgreSQL")]
-        chroma[("ChromaDB")]
         next --> api
         api <--> db
-        api --> worker
+        worker -->|Claims queued sessions| db
         worker --> runtime
         runtime --> gate
         gate <--> db
-        gate <--> chroma
     end
 
     subgraph model["Model boundary"]
-        agent["Tool-calling model"]
-        checker["Typed classifier"]
-        embed["Embedding model"]
+        agent["Agent LLM"]
+        checker["Classifier LLM"]
         runtime <--> agent
         gate <--> checker
-        chroma <--> embed
     end
 ```
 
-Job descriptions, recruiter messages, retrieved passages, and tool output are untrusted
-data. They cannot change the runtime instructions or tool permissions. They can still
-influence model judgment, so PolicyKit treats prompt-injection resistance as a tested
-defense rather than a guarantee.
+Job descriptions, recruiter messages, and tool output are untrusted data. They cannot
+change the runtime instructions or tool permissions. They can still influence model
+judgment, so PolicyKit tests its prompt-injection defenses.
 
 ## Request sequence
 
@@ -58,51 +51,49 @@ sequenceDiagram
     participant A as FastAPI
     participant P as PostgreSQL
     participant K as Agent worker
-    participant O as Orchestrator
-    participant C as Classifier
+    participant O as Agent LLM
+    participant C as Classifier LLM
 
     R->>W: Submit draft and hiring facts
-    W->>A: POST compliance session
-    A->>P: Pin latest policy snapshot and queue session
-    A-->>W: Session ID and queued state
+    W->>A: Create compliance session
+    A->>P: Pin policy snapshot and queue session
+    A-->>W: Return session ID and queued state
     K->>P: Claim queued session
-    K->>O: Current state and allowed tools
-    O-->>K: run_compliance_check
-    K->>P: Load complete applicable policy set
-    K->>C: Posting and typed policy payloads
-    C-->>K: One assessment per policy
+    K->>O: Send current state and allowed tools
+    O-->>K: Run complete policy check
+    K->>P: Load every applicable policy
+    K->>C: Send posting and typed policy batches
+    C-->>K: Return one assessment per policy
     K->>K: Validate coverage and evidence offsets
-    K->>P: Store findings, tokens, latency, and response ID
+    K->>P: Store findings and audit data
     alt Clean posting
         K->>P: Mark ready to publish
     else Supported violation
-        K->>O: Findings and available tools
-        O-->>K: Exact proposed edits
+        K->>O: Send findings and allowed tools
+        O-->>K: Declare exact proposed edits
         K->>K: Reconstruct revision from declared edits
         K->>P: Wait for recruiter decisions
-        R->>W: Accept or reject each proposed edit
-        W->>A: POST edit decisions
-        A->>P: Build a posting from accepted edits
-        A->>P: Store rejected edits as agent feedback
-        A->>P: Queue the selected posting for a fresh check
-    else Missing fact or ambiguous policy
-        K->>P: Ask recruiter or request human review
+        R->>W: Accept or reject each edit
+        W->>A: Submit edit decisions
+        A->>P: Build posting from accepted edits
+        A->>P: Queue posting for a fresh check
+    else Missing fact
+        K->>P: Ask recruiter one focused question
+    else Unresolved finding
+        K->>P: Finish review for recruiter decision
     end
 ```
 
 ## Two model roles
 
 The orchestrator receives the publication goal, current posting, resolved scope, recent
-activity, and current-state tool schemas. It chooses one action. It does not receive the
-full policy catalog and cannot declare a posting compliant by itself.
+activity, and current-state tool definitions. It chooses one action. It cannot choose the
+applicable policy set or declare a posting publishable by itself.
 
 The classifier runs inside `run_compliance_check`. Python supplies every policy applicable
-to the session's immutable snapshot. Policies are processed in bounded batches while each
-batch receives the complete posting. Python combines the responses and still requires one
-structured assessment per applicable policy. The classifier has no tools and cannot choose
-a smaller policy set. A response that reaches its output limit receives one retry with a
-larger limit. A second incomplete response stops the session and records the response IDs,
-reason, and token use.
+to the session's immutable snapshot. Policies are processed in bounded batches, and each
+batch receives the complete posting. Python combines the responses and requires one typed
+assessment per policy. The classifier has no tools and cannot choose a smaller policy set.
 
 ## Durable state
 
@@ -113,18 +104,16 @@ PostgreSQL stores:
 - Original and agent-authored posting versions
 - Agent states, tool inputs and outputs, tokens, latency, and response IDs
 - Per-policy assessments and exact evidence offsets
-- Proposed changes and recruiter approvals
-- Human reviews and reviewed precedents
+- Proposed changes and recruiter decisions
+- Publication overrides and their explanations
 - Authored eval cases
 - Exact classifier cache entries
 
 The worker claims queued sessions with row locking on PostgreSQL. Each worker iteration
-also recovers sessions that stayed in `investigating` past the configured stale threshold.
+also recovers sessions that remain in `investigating` past the configured stale threshold.
 
-Policy changes lock the stable policy record. Publication also takes a PostgreSQL advisory
-transaction lock so concurrent policies receive distinct snapshot numbers. Human review
-locks and rechecks the session status before writing a decision. These rules prevent stale
-clients from modifying published content or overwriting another review.
+Policy changes lock the stable policy record. Publication takes a PostgreSQL transaction
+lock so concurrent policy changes receive distinct snapshot numbers.
 
 ## Policy time model
 
@@ -133,59 +122,42 @@ time. A new snapshot contains only policy versions active at publication time. E
 compliance session evaluates its pinned snapshot at the session start time. This makes an
 in-progress review reproducible if a policy expires before the recruiter finishes.
 
-## Search and cache
-
-ChromaDB has two derived collections:
-
-- `policy_chunks`
-- `reviewed_precedents`
-
-OpenAI embeddings are supplied explicitly. ChromaDB returns candidate IDs and distances.
-Python rejects candidates outside the pinned snapshot and returns canonical text from
-PostgreSQL. Chroma can be deleted and rebuilt with:
-
-```bash
-cd server
-.venv/bin/python -m app.scripts.reindex
-```
-
-Semantic search supports investigation. It does not narrow the required full-policy check
-or produce the final verdict.
+## Exact classifier cache
 
 The exact classifier cache is stored in PostgreSQL. Its key includes the posting text,
 policy snapshot, applicable policy IDs, model, prompt namespace, and checker settings. A
 cache hit still passes through the normal output validation and records an audit step with
 zero model tokens.
 
-## Completion and publication gates
+## Completion and publication
 
 `complete_session` succeeds only when:
 
 - All hiring locations resolve to known concrete jurisdictions.
 - The latest posting version has one assessment for every applicable policy.
-- Every assessment is `no_violation`, or a reviewer explicitly resolved it.
+- Every assessment is `no_violation`.
 - An agent-authored revision has recruiter approval.
 - The findings belong to the current posting version and pinned snapshot.
 
-Publication runs the same gate again. A stale status or direct API call cannot bypass full
-coverage. Missing or failed work produces a retry, a focused question, a human-review
-request, or a failed session.
+Publication runs the same gate for a clean posting. A recruiter can instead publish with
+unresolved findings by providing an override explanation. The explanation is stored in the
+audit trail. An override never publishes an unapproved agent revision.
 
 ## Revision decisions
 
 The recruiter decides on each proposed edit. The API requires one decision for every
-pending edit and rejects incomplete decision sets. If all edits are accepted,
-the complete agent draft becomes the current approved posting. If only some edits are
-accepted, Python reconstructs a new approved posting from those edits only. If all edits
-are rejected, the original posting remains current. Rejected edits and the recruiter note
-are stored as feedback. Every result returns to the queue for a new compliance check.
+pending edit and rejects incomplete decision sets. If all edits are accepted, the complete
+agent draft becomes the current approved posting. If only some edits are accepted, Python
+reconstructs a new approved posting from those edits only. If all edits are rejected, the
+original posting remains current. Rejected edits and the recruiter note are stored as
+feedback. Every result returns to the queue for a new compliance check.
 
 ## Failure behavior
 
 - A malformed or incomplete classifier response is rejected before findings are stored.
 - Evidence text and offsets must match the exact posting substring.
 - The runtime records failed tool calls and includes them in the next agent turn.
-- The agent stops at its configured step limit and sends the session to human review.
+- The agent stops with a failure at its configured step limit.
 - Interrupted worker sessions return to the queue after the stale threshold.
 - External provider failures return controlled API errors and keep database state durable.
 
@@ -195,5 +167,5 @@ The local application can run its worker inside FastAPI. A deployed system can r
 and worker as separate processes against the same PostgreSQL database.
 
 The prototype has no external identity provider. Production use requires authenticated
-recruiter, reviewer, and policy-admin roles, tenant isolation, managed secrets, rate limits,
+recruiter and policy-admin roles, tenant isolation, managed secrets, rate limits,
 monitoring, and retention controls.

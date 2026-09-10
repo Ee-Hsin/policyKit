@@ -30,22 +30,12 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_agent_model: str = "gpt-5.4-mini"
     openai_checker_model: str = "gpt-5.4-mini"
-    openai_embedding_model: str = "text-embedding-3-small"
     openai_store_responses: bool = False
     openai_timeout_seconds: float = 60
     openai_agent_max_output_tokens: int = 1_200
     openai_checker_max_output_tokens: int = Field(default=12_000, ge=1_000)
     openai_checker_policy_batch_size: int = Field(default=4, ge=1)
     openai_checker_reasoning_effort: Literal["low", "medium", "high"] = "medium"
-
-    chroma_mode: Literal["persistent", "http", "disabled"] = "persistent"
-    chroma_persist_directory: Path = REPOSITORY_DIRECTORY / ".data" / "chroma"
-    chroma_host: str = "localhost"
-    chroma_port: int = 8001
-    chroma_ssl: bool = False
-    chroma_api_key: str | None = None
-    chroma_tenant: str | None = None
-    chroma_database: str | None = None
 
     run_agent_worker: bool = True
     agent_poll_interval_seconds: float = 1.0

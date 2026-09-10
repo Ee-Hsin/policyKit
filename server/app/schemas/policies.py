@@ -138,7 +138,6 @@ class PolicyVersionRead(PolicyVersionFields):
     id: str
     version: int
     status: str
-    index_status: str
     published_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -151,7 +150,6 @@ class PolicySummary(BaseModel):
     category: PolicyCategory
     current_version: int
     status: str
-    index_status: str
     jurisdictions: list[str]
     updated_at: datetime
 
@@ -181,4 +179,3 @@ class PolicyTestResponse(BaseModel):
 class PublishPolicyResponse(BaseModel):
     policy: PolicyDetail
     snapshot_version: int
-    index_status: str

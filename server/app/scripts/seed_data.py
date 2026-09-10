@@ -14,7 +14,6 @@ from app.core.database import SessionFactory
 from app.evals.fixtures import AUTHORED_EVAL_CASES, validate_fixtures
 from app.models.entities import (
     EvalCase,
-    IndexStatus,
     Policy,
     PolicySnapshot,
     PolicySnapshotItem,
@@ -85,8 +84,8 @@ POLICY_SEEDS = (
                 rule_text=(
                     "A posting must not prefer, require, or exclude applicants because of race, "
                     "color, national origin, sex, gender, religion, pregnancy, or another "
-                    "protected class. A documented lawful occupational qualification requires "
-                    "human review."
+                    "protected class. A claimed lawful occupational qualification must be "
+                    "documented before publication."
                 ),
                 rationale="Hiring criteria must relate to the work rather than protected identity.",
                 remediation="Replace identity requirements with the relevant job qualification.",
@@ -96,9 +95,7 @@ POLICY_SEEDS = (
                     "Applicants of all backgrounds are welcome.",
                     "Spanish fluency is required to support Spanish-speaking customers.",
                 ),
-                exceptions=(
-                    "A claimed lawful occupational qualification must be escalated for review.",
-                ),
+                exceptions=("A claimed lawful occupational qualification must be documented.",),
             ),
         ),
     ),
@@ -344,7 +341,6 @@ def _version_values(seed: PolicyVersionSeed, *, title: str, category: str) -> di
         "effective_at": seed.effective_at,
         "expires_at": seed.expires_at,
         "published_at": seed.published_at,
-        "index_status": IndexStatus.PENDING.value,
     }
 
 
@@ -446,7 +442,6 @@ async def seed_database() -> None:
         f"Seeded {len(published_versions)} published policies, "
         f"snapshot {snapshot.version}, and {eval_count} eval cases."
     )
-    print("Chroma indexing was not run; use `python -m app.scripts.reindex` when ready.")
 
 
 if __name__ == "__main__":

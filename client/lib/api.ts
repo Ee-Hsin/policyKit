@@ -86,7 +86,7 @@ export function approveRevision(
 ) {
   return request<ComplianceSession>(`/compliance-sessions/${id}/approve`, {
     method: "POST",
-    body: JSON.stringify({ decisions, reviewer_name: "Demo recruiter", notes: notes || null }),
+    body: JSON.stringify({ decisions, recruiter_name: "Demo recruiter", notes: notes || null }),
   });
 }
 
@@ -143,6 +143,5 @@ export function publishPolicy(policyId: string, versionId: string) {
   return request<{
     policy: PolicyDetail;
     snapshot_version: number;
-    index_status: string;
   }>(`/policies/${policyId}/versions/${versionId}/publish`, { method: "POST" });
 }

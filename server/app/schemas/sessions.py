@@ -27,7 +27,7 @@ class RevisionChangeDecision(BaseModel):
 
 class RevisionApproval(BaseModel):
     decisions: list[RevisionChangeDecision] = Field(min_length=1)
-    reviewer_name: str = Field(default="Demo recruiter", min_length=2, max_length=160)
+    recruiter_name: str = Field(default="Demo recruiter", min_length=2, max_length=160)
     notes: str | None = Field(default=None, max_length=2_000)
 
 
@@ -70,7 +70,6 @@ class FindingRead(BaseModel):
     evidence_end: int | None
     reason: str
     confidence: float | None
-    resolved: bool
 
 
 class ProposedChangeRead(BaseModel):
@@ -127,11 +126,3 @@ class SessionListItem(BaseModel):
     target_locations: list[str]
     finding_count: int
     updated_at: datetime
-
-
-class HumanReviewCreate(BaseModel):
-    reviewer_name: str = Field(min_length=2, max_length=160)
-    decision: str = Field(pattern=r"^(approve|reject|request_changes)$")
-    notes: str | None = Field(default=None, max_length=3_000)
-    promote_to_precedent: bool = False
-    finding_id: str | None = None

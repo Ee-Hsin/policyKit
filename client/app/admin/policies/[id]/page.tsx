@@ -122,7 +122,7 @@ export default function PolicyDetailPage() {
     try {
       const result = await publishPolicy(params.id, selected.id);
       setPolicy(result.policy);
-      setNotice(`Version ${selected.version} published in policy snapshot ${result.snapshot_version}. Chroma index: ${result.index_status}.`);
+      setNotice(`Version ${selected.version} published in policy snapshot ${result.snapshot_version}.`);
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : "Could not publish the policy.");
     } finally {

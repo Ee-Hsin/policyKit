@@ -76,7 +76,6 @@ async def session_response(db: AsyncSession, session: ComplianceSession) -> Comp
                 evidence_end=finding.evidence_end,
                 reason=finding.reason,
                 confidence=finding.confidence,
-                resolved=finding.resolved,
             )
             for finding in findings
         ],
@@ -167,7 +166,7 @@ async def approve_revision(
             db,
             session,
             decisions={decision.change_id: decision.approved for decision in request.decisions},
-            reviewer_name=request.reviewer_name,
+            recruiter_name=request.recruiter_name,
             notes=request.notes,
         )
         return await session_response(db, await repository.get_session(db, session_id))

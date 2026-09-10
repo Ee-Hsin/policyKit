@@ -2,7 +2,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints import policies as policy_endpoints
-from app.models.entities import ComplianceSessionStatus, FindingStatus, PostingVersion
+from app.models.entities import ComplianceSessionStatus, FindingStatus
 from app.repositories import policies as policy_repository
 from app.repositories import sessions as session_repository
 from app.schemas.ai import PolicyAssessment, ProposedRevision
@@ -24,22 +24,6 @@ SESSION_REQUEST = {
 }
 
 
-class NoCostGateway:
-    def __init__(self, _settings) -> None:
-        pass
-
-    async def embed(self, texts: list[str]) -> list[list[float]]:
-        return [[1.0, float(len(text))] for text in texts]
-
-
-class NoCostIndex:
-    def __init__(self, _settings, _ai) -> None:
-        pass
-
-    async def index_policy(self, _version) -> None:
-        return None
-
-
 class FailingGateway:
     def __init__(self, _settings) -> None:
         pass
@@ -48,11 +32,7 @@ class FailingGateway:
         raise RuntimeError("provider unavailable")
 
 
-async def create_and_publish_policy(
-    api_client: httpx.AsyncClient, monkeypatch
-) -> tuple[dict, dict]:
-    monkeypatch.setattr(policy_endpoints, "OpenAIGateway", NoCostGateway)
-    monkeypatch.setattr(policy_endpoints, "ChromaIndex", NoCostIndex)
+async def create_and_publish_policy(api_client: httpx.AsyncClient) -> tuple[dict, dict]:
     created_response = await api_client.post("/api/v1/policies", json=POLICY_REQUEST)
     assert created_response.status_code == 201
     created = created_response.json()
@@ -201,12 +181,11 @@ async def test_policy_test_returns_a_controlled_provider_error(
 
 
 async def test_admin_can_publish_a_policy_and_session_is_pinned_to_its_snapshot(
-    api_client: httpx.AsyncClient, monkeypatch
+    api_client: httpx.AsyncClient,
 ) -> None:
-    created, published = await create_and_publish_policy(api_client, monkeypatch)
+    created, published = await create_and_publish_policy(api_client)
 
     assert published["snapshot_version"] == 1
-    assert published["index_status"] == "indexed"
     assert published["policy"]["versions"][0]["status"] == "published"
 
     response = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
@@ -225,9 +204,9 @@ async def test_admin_can_publish_a_policy_and_session_is_pinned_to_its_snapshot(
 
 
 async def test_session_approval_and_publish_endpoints_enforce_state(
-    api_client: httpx.AsyncClient, monkeypatch
+    api_client: httpx.AsyncClient,
 ) -> None:
-    await create_and_publish_policy(api_client, monkeypatch)
+    await create_and_publish_policy(api_client)
     created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
     session_id = created.json()["id"]
 
@@ -235,7 +214,7 @@ async def test_session_approval_and_publish_endpoints_enforce_state(
         f"/api/v1/compliance-sessions/{session_id}/approve",
         json={
             "decisions": [{"change_id": "missing", "approved": True}],
-            "reviewer_name": "Test recruiter",
+            "recruiter_name": "Test recruiter",
         },
     )
     assert approval.status_code == 409
@@ -257,14 +236,12 @@ async def test_session_approval_and_publish_endpoints_enforce_state(
 async def test_publication_override_requires_and_records_an_explanation(
     api_client: httpx.AsyncClient,
     db: AsyncSession,
-    monkeypatch,
 ) -> None:
-    await create_and_publish_policy(api_client, monkeypatch)
+    await create_and_publish_policy(api_client)
     created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
     session_id = created.json()["id"]
     session = await session_repository.get_session(db, session_id)
-    session.status = ComplianceSessionStatus.NEEDS_REVIEW.value
-    session.error_message = "The policy result requires human judgment."
+    session.status = ComplianceSessionStatus.REVIEW_COMPLETE.value
     await db.commit()
 
     missing_reason = await api_client.post(
@@ -280,7 +257,7 @@ async def test_publication_override_requires_and_records_an_explanation(
         f"/api/v1/compliance-sessions/{session_id}/publish",
         json={
             "publisher_name": "Test recruiter",
-            "override_reason": "  A policy reviewer approved this exception.  ",
+            "override_reason": "  The business owner accepted this exception.  ",
         },
     )
 
@@ -290,16 +267,15 @@ async def test_publication_override_requires_and_records_an_explanation(
     assert payload["steps"][-1]["output_data"] == {
         "publisher_name": "Test recruiter",
         "overrode_review": True,
-        "override_reason": "A policy reviewer approved this exception.",
+        "override_reason": "The business owner accepted this exception.",
     }
 
 
 async def test_publication_override_does_not_publish_an_unapproved_agent_revision(
     api_client: httpx.AsyncClient,
     db: AsyncSession,
-    monkeypatch,
 ) -> None:
-    await create_and_publish_policy(api_client, monkeypatch)
+    await create_and_publish_policy(api_client)
     created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
     session_id = created.json()["id"]
     session = await session_repository.get_session(db, session_id)
@@ -354,9 +330,8 @@ async def test_publication_override_does_not_publish_an_unapproved_agent_revisio
 async def test_message_response_includes_the_recorded_user_step(
     api_client: httpx.AsyncClient,
     db: AsyncSession,
-    monkeypatch,
 ) -> None:
-    await create_and_publish_policy(api_client, monkeypatch)
+    await create_and_publish_policy(api_client)
     created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
     session_id = created.json()["id"]
     session = await session_repository.get_session(db, session_id)
@@ -379,9 +354,8 @@ async def test_message_response_includes_the_recorded_user_step(
 async def test_proposed_revision_response_keeps_the_findings_it_addresses(
     api_client: httpx.AsyncClient,
     db: AsyncSession,
-    monkeypatch,
 ) -> None:
-    await create_and_publish_policy(api_client, monkeypatch)
+    await create_and_publish_policy(api_client)
     created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
     session_id = created.json()["id"]
     session = await session_repository.get_session(db, session_id)
@@ -439,7 +413,7 @@ async def test_proposed_revision_response_keeps_the_findings_it_addresses(
                 {"change_id": changes[0]["id"], "approved": True},
                 {"change_id": changes[1]["id"], "approved": False},
             ],
-            "reviewer_name": "Test recruiter",
+            "recruiter_name": "Test recruiter",
             "notes": "Keep the original customer term.",
         },
     )
@@ -460,9 +434,8 @@ async def test_proposed_revision_response_keeps_the_findings_it_addresses(
 async def test_publish_response_includes_the_publication_step(
     api_client: httpx.AsyncClient,
     db: AsyncSession,
-    monkeypatch,
 ) -> None:
-    await create_and_publish_policy(api_client, monkeypatch)
+    await create_and_publish_policy(api_client)
     created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
     session_id = created.json()["id"]
     session = await session_repository.get_session(db, session_id)
@@ -495,86 +468,3 @@ async def test_publish_response_includes_the_publication_step(
         "publisher_name": "Test recruiter",
         "overrode_review": False,
     }
-
-
-async def test_reviewer_cannot_approve_an_unchecked_escalated_session(
-    api_client: httpx.AsyncClient,
-    db: AsyncSession,
-    monkeypatch,
-) -> None:
-    await create_and_publish_policy(api_client, monkeypatch)
-    created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
-    session_id = created.json()["id"]
-    session = await session_repository.get_session(db, session_id)
-    session.status = ComplianceSessionStatus.NEEDS_REVIEW.value
-    await db.commit()
-
-    queue = await api_client.get("/api/v1/reviews")
-    assert queue.status_code == 200
-    assert [item["id"] for item in queue.json()] == [session_id]
-
-    reviewed = await api_client.post(
-        f"/api/v1/reviews/{session_id}",
-        json={
-            "reviewer_name": "Policy reviewer",
-            "decision": "approve",
-            "notes": "Reviewed against the source policy.",
-        },
-    )
-    assert reviewed.status_code == 409
-    assert reviewed.json()["detail"] == ("The current draft has not completed full policy coverage")
-
-
-async def test_reviewer_cannot_promote_evidence_from_an_older_posting_version(
-    api_client: httpx.AsyncClient,
-    db: AsyncSession,
-    monkeypatch,
-) -> None:
-    await create_and_publish_policy(api_client, monkeypatch)
-    created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
-    session = await session_repository.get_session(db, created.json()["id"])
-    snapshot = await policy_repository.get_snapshot(db, session.policy_snapshot_id)
-    policy_version_id = snapshot.items[0].policy_version_id
-    await session_repository.replace_findings(
-        db,
-        session,
-        [
-            PolicyAssessment(
-                policy_id=policy_version_id,
-                status=FindingStatus.VIOLATION,
-                evidence_text="Python services",
-                evidence_start=15,
-                evidence_end=30,
-                reason="Test finding for the original posting.",
-            )
-        ],
-    )
-    old_findings = await session_repository.findings_for_session(
-        db,
-        session.id,
-        posting_version_id=session.current_posting_version_id,
-    )
-    new_version = PostingVersion(
-        posting_id=session.posting_id,
-        version=2,
-        content="Build reliable services for our learning platform and customers.",
-        source="user",
-    )
-    db.add(new_version)
-    await db.flush()
-    session.current_posting_version_id = new_version.id
-    session.status = ComplianceSessionStatus.NEEDS_REVIEW.value
-    await db.commit()
-
-    response = await api_client.post(
-        f"/api/v1/reviews/{session.id}",
-        json={
-            "reviewer_name": "Policy reviewer",
-            "decision": "reject",
-            "promote_to_precedent": True,
-            "finding_id": old_findings[0].id,
-        },
-    )
-
-    assert response.status_code == 422
-    assert response.json()["detail"] == "Finding is not part of the current posting version"

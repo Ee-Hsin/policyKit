@@ -27,16 +27,13 @@ flowchart LR
     admin["Policy admin"] --> web
     web --> api["FastAPI"]
     api --> db[("PostgreSQL\nsource of truth")]
-    api --> queue["Durable queued session"]
-    queue --> worker["Python agent worker"]
-    worker --> agent["Tool-calling orchestrator"]
-    agent --> orchestrator["OpenAI agent model"]
+    worker["Python agent worker"] -->|Claims queued sessions| db
+    worker --> agent["Tool-calling runtime"]
+    agent --> orchestrator["Agent LLM"]
     agent --> tools["State-scoped Python tools"]
     tools --> checker["Full-policy checker"]
-    checker --> classifier["OpenAI structured classifier"]
+    checker --> classifier["Classifier LLM"]
     tools --> db
-    tools <--> chroma[("ChromaDB\nderived index")]
-    chroma --> embeddings["OpenAI embeddings"]
 ```
 
 There are two model roles:
@@ -54,15 +51,13 @@ scope or publication.
 | Technology | Responsibility |
 | --- | --- |
 | Python | Agent runtime, tool permissions, validation, recovery, cache keys, and evals |
-| FastAPI | Recruiter sessions, policy administration, human review, and publication APIs |
-| OpenAI | Agent tool selection, structured policy assessment, and embeddings |
-| PostgreSQL | Policies, snapshots, posting versions, findings, approvals, audit steps, and exact cache |
-| ChromaDB | Rebuildable semantic search over policies and human-reviewed precedents |
+| FastAPI | Recruiter sessions, policy administration, edit decisions, and publication APIs |
+| LLM | Agent tool selection and structured policy assessment |
+| PostgreSQL | Policies, snapshots, posting versions, findings, recruiter decisions, audit steps, and exact cache |
 | Next.js | Recruiter workspace and policy-administration interface |
 
-PostgreSQL is always authoritative. Chroma returns candidates for investigation only.
-Python restricts policy search results to the session's pinned snapshot and hydrates the
-canonical text from PostgreSQL. Retrieval never narrows the mandatory full-policy check.
+PostgreSQL is always authoritative. Python selects every applicable policy from the
+session's pinned snapshot. The classifier must return one result for each selected policy.
 
 ## Session lifecycle
 
@@ -74,31 +69,38 @@ stateDiagram-v2
     waiting_for_information --> queued: Recruiter answers
     investigating --> waiting_for_approval: Agent proposes exact edits
     waiting_for_approval --> queued: Recruiter submits edit decisions
-    investigating --> needs_review: Policy judgment is ambiguous
-    needs_review --> ready_to_publish: Reviewer resolves findings
+    investigating --> review_complete: Findings require a recruiter decision
     investigating --> ready_to_publish: Complete clean check
     ready_to_publish --> published: Publication gate passes
+    waiting_for_information --> published: Recruiter overrides review
+    waiting_for_approval --> published: Recruiter overrides review
+    review_complete --> published: Recruiter overrides review
     investigating --> failed: Unrecoverable error
+    failed --> published: Recruiter overrides review
 ```
 
-Every transition is stored. The audit trail includes tool inputs and outputs, model
-response IDs, token use, latency, evidence, posting versions, exact edits, and human
-decisions. A periodic worker recovery pass returns interrupted sessions to the queue.
+The audit trail includes tool inputs and outputs, model response IDs, token use, latency,
+evidence, posting versions, exact edits, and recruiter decisions. A periodic worker
+recovery pass returns interrupted sessions to the queue.
 
 ## Publication safeguards
 
-`complete_session` and the publication endpoint both enforce these conditions:
+`complete_session` and the clean publication path enforce these conditions:
 
 - Every recruiter location resolves to a supported concrete jurisdiction.
 - The latest posting has one assessment for every applicable policy.
-- No unresolved `violation` or `uncertain` finding remains.
+- Every assessment is `no_violation`.
 - An agent-authored posting version has explicit recruiter approval.
 - The assessment set matches the current posting version and the pinned policy snapshot.
+
+The override publication path requires a recruiter explanation and stores it in the audit
+trail. It never publishes an unapproved agent revision. An override can run after the
+current agent step pauses or finishes, which prevents a publication race with the worker.
 
 Policy applicability is evaluated at the session start time. A policy that expires while a
 review is in progress remains part of that review, while new sessions use the current
 policy set. Published policy versions are immutable. PostgreSQL locks serialize policy
-publication and human-review decisions so stale writes cannot change history.
+publication so concurrent changes cannot create conflicting snapshots.
 
 ## Policy administration
 
@@ -107,7 +109,7 @@ A policy includes its category, canonical scope, enforcement level, rule, remedi
 exceptions, and both violation and compliant examples. Category is restricted to
 `Discrimination`, `Compensation`, `Employment status`, `Transparency`, or `Content`.
 
-![Versioned policies and Chroma index status](docs/images/policykit-policy-library.png)
+![Versioned policies in the policy library](docs/images/policykit-policy-library.png)
 
 ![The compact policy editor](docs/images/policykit-policy-editor.png)
 
@@ -129,12 +131,10 @@ The orchestrator can receive these strict tools, depending on the current state:
 | --- | --- |
 | `set_hiring_locations` | Save a location supplied by the recruiter |
 | `run_compliance_check` | Check every applicable policy |
-| `search_policies` | Retrieve related indexed policy passages for investigation |
 | `read_policy` | Read one canonical policy from the pinned snapshot |
-| `search_reviewed_precedents` | Retrieve similar human-reviewed evidence |
 | `propose_revision` | Declare the smallest supported edits; Python reconstructs the draft |
 | `ask_recruiter` | Pause for a missing business fact |
-| `escalate_to_reviewer` | Request policy judgment from a person |
+| `finish_with_findings` | End the review when findings require a recruiter decision |
 | `complete_session` | Ask Python to apply the clean-check gate |
 
 The runtime rejects unknown tools, tools that were not offered in the current state,
@@ -149,7 +149,7 @@ Requirements:
 - Node.js 22+
 - PostgreSQL 14+
 
-Copy the environment template and add an OpenAI project key:
+Copy the environment template and add an LLM provider API key:
 
 ```bash
 cp .env.example .env
@@ -180,12 +180,7 @@ python3.12 -m venv .venv
 .venv/bin/python -m app.scripts.seed_data
 ```
 
-The seed is deterministic and makes no OpenAI calls. Build the derived Chroma index when
-the API key is ready:
-
-```bash
-.venv/bin/python -m app.scripts.reindex
-```
+The seed is deterministic and makes no LLM calls.
 
 Start FastAPI and its in-process worker:
 
@@ -216,8 +211,7 @@ The complete template is in [`.env.example`](.env.example). Important settings i
 | `OPENAI_CHECKER_REASONING_EFFORT` | `medium` | Checker reasoning level |
 | `OPENAI_CHECKER_MAX_OUTPUT_TOKENS` | `12000` | Initial output limit for each policy batch |
 | `OPENAI_CHECKER_POLICY_BATCH_SIZE` | `4` | Policies assessed per structured model response |
-| `OPENAI_STORE_RESPONSES` | `false` | OpenAI response-storage choice |
-| `CHROMA_MODE` | `persistent` | `persistent`, `http`, or `disabled` |
+| `OPENAI_STORE_RESPONSES` | `false` | LLM response-storage choice |
 | `RUN_AGENT_WORKER` | `true` | Runs the queue worker with FastAPI |
 | `AGENT_MAX_STEPS` | `12` | Maximum investigation actions per run |
 | `AGENT_STALE_AFTER_SECONDS` | `300` | Interrupted-run recovery threshold |
@@ -273,5 +267,5 @@ See [docs/evaluation.md](docs/evaluation.md) for metric definitions and
 
 This repository is a working product prototype. It does not yet include an external
 identity provider or multi-tenant authorization. A production deployment must add
-authenticated recruiter, reviewer, and policy-admin roles at the FastAPI boundary, plus
-managed PostgreSQL, managed Chroma, secret management, rate limits, and monitoring.
+authenticated recruiter and policy-admin roles at the FastAPI boundary, plus managed
+PostgreSQL, secret management, rate limits, and monitoring.

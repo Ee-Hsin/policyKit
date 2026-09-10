@@ -1,7 +1,6 @@
 from collections.abc import Callable
 from typing import Any
 
-from app.integrations.chroma import SemanticMatch
 from app.integrations.openai_gateway import ComplianceModelResult
 from app.schemas.ai import AgentTurn, ComplianceCheckOutput
 
@@ -51,30 +50,3 @@ class FakeAI:
         if not self.agent_turns:
             raise AssertionError("The test did not configure another agent turn")
         return self.agent_turns.pop(0)
-
-    async def embed(self, texts: list[str]) -> list[list[float]]:
-        return [[float(len(text)), 1.0] for text in texts]
-
-
-class FakeIndex:
-    def __init__(self, matches: list[SemanticMatch] | None = None) -> None:
-        self.matches = matches or []
-        self.search_calls: list[dict[str, Any]] = []
-
-    async def search(
-        self,
-        collection_name: str,
-        query: str,
-        *,
-        limit: int = 5,
-        where: dict[str, Any] | None = None,
-    ) -> list[SemanticMatch]:
-        self.search_calls.append(
-            {
-                "collection_name": collection_name,
-                "query": query,
-                "limit": limit,
-                "where": where,
-            }
-        )
-        return self.matches[:limit]

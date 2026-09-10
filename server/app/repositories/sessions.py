@@ -14,13 +14,12 @@ from app.models.entities import (
     ComplianceFinding,
     ComplianceSession,
     ComplianceSessionStatus,
-    HumanReview,
     JobPosting,
     PolicySnapshot,
     PolicyVersion,
     PostingVersion,
     ProposedChange,
-    ReviewedPrecedent,
+    RevisionDecision,
     StepStatus,
 )
 from app.schemas.ai import PolicyAssessment, ProposedRevision
@@ -209,7 +208,6 @@ async def replace_findings(
             evidence_end=assessment.evidence_end,
             reason=assessment.reason,
             confidence=assessment.confidence,
-            resolved=assessment.status.value == "no_violation",
         )
         for assessment in assessments
     ]
@@ -270,7 +268,7 @@ async def record_revision_decision(
     session: ComplianceSession,
     *,
     decisions: dict[str, bool],
-    reviewer_name: str,
+    recruiter_name: str,
     notes: str | None,
 ) -> None:
     proposed_changes = await proposed_changes_for_session(db, session.id)
@@ -298,13 +296,13 @@ async def record_revision_decision(
     if not previous:
         raise ValueError("The source posting for these changes is unavailable")
 
-    review = HumanReview(
+    revision_decision = RevisionDecision(
         session_id=session.id,
-        reviewer_name=reviewer_name,
+        recruiter_name=recruiter_name,
         decision="approve" if not rejected else "reject" if not accepted else "partial",
         notes=notes,
     )
-    db.add(review)
+    db.add(revision_decision)
 
     if not rejected:
         session.current_posting_version.approved_at = utc_now()
@@ -391,67 +389,6 @@ async def record_user_message(db: AsyncSession, session: ComplianceSession, mess
     await db.commit()
 
 
-async def add_human_review(
-    db: AsyncSession,
-    session: ComplianceSession,
-    *,
-    reviewer_name: str,
-    decision: str,
-    notes: str | None,
-    precedent: tuple[ComplianceFinding, str] | None = None,
-) -> HumanReview:
-    status_statement = select(ComplianceSession.status).where(ComplianceSession.id == session.id)
-    if db.bind and db.bind.dialect.name == "postgresql":
-        status_statement = status_statement.with_for_update()
-    current_status = await db.scalar(status_statement)
-    if current_status != ComplianceSessionStatus.NEEDS_REVIEW.value:
-        raise ValueError("Session does not require human review")
-    findings = await findings_for_session(
-        db,
-        session.id,
-        posting_version_id=session.current_posting_version_id,
-    )
-    reviewed_finding_ids = [finding.id for finding in findings if finding.status != "no_violation"]
-    review = HumanReview(
-        session_id=session.id,
-        reviewer_name=reviewer_name,
-        decision=decision,
-        notes=notes,
-        finding_ids=reviewed_finding_ids,
-    )
-    db.add(review)
-    await db.flush()
-    if precedent:
-        finding, excerpt = precedent
-        jurisdictions, _ = resolve_jurisdictions(session.posting.target_locations)
-        db.add(
-            ReviewedPrecedent(
-                human_review_id=review.id,
-                excerpt=excerpt,
-                decision=decision,
-                jurisdiction=(jurisdictions or ["GLOBAL"])[0],
-                category=finding.policy_version.category,
-                policy_version_id=finding.policy_version_id,
-            )
-        )
-    if decision == "approve":
-        for finding in findings:
-            if finding.id in reviewed_finding_ids:
-                finding.resolved = True
-        await db.flush()
-        await validate_publishable(db, session)
-        session.status = ComplianceSessionStatus.READY_TO_PUBLISH.value
-        session.completed_at = utc_now()
-    elif decision == "request_changes":
-        session.status = ComplianceSessionStatus.WAITING_FOR_INFORMATION.value
-        session.current_question = notes or "What should change before this posting is approved?"
-    else:
-        session.status = ComplianceSessionStatus.FAILED.value
-        session.error_message = notes or "A reviewer rejected this posting."
-    await db.commit()
-    return review
-
-
 async def validate_publishable(db: AsyncSession, session: ComplianceSession) -> None:
     from app.repositories import policies as policy_repository
 
@@ -485,9 +422,7 @@ async def validate_publishable(db: AsyncSession, session: ComplianceSession) -> 
         or set(checked_policy_ids) != applicable_policy_ids
     ):
         raise ValueError("The current draft has not completed full policy coverage")
-    unresolved_findings = [
-        finding for finding in findings if finding.status != "no_violation" and not finding.resolved
-    ]
+    unresolved_findings = [finding for finding in findings if finding.status != "no_violation"]
     if unresolved_findings:
         raise ValueError("The current draft still has unresolved findings")
 
@@ -508,7 +443,7 @@ async def publish_posting(
         overridable_statuses = {
             ComplianceSessionStatus.WAITING_FOR_INFORMATION.value,
             ComplianceSessionStatus.WAITING_FOR_APPROVAL.value,
-            ComplianceSessionStatus.NEEDS_REVIEW.value,
+            ComplianceSessionStatus.REVIEW_COMPLETE.value,
             ComplianceSessionStatus.FAILED.value,
         }
         if session.status not in overridable_statuses:

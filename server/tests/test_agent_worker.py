@@ -35,7 +35,6 @@ async def test_each_worker_iteration_recovers_stale_sessions(monkeypatch) -> Non
     worker = AgentWorker(
         Settings(
             database_url="sqlite+aiosqlite://",
-            chroma_mode="disabled",
             run_agent_worker=False,
             agent_stale_after_seconds=45,
         )

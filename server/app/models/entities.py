@@ -35,12 +35,6 @@ class PolicyStatus(enum.StrEnum):
     RETIRED = "retired"
 
 
-class IndexStatus(enum.StrEnum):
-    PENDING = "pending"
-    INDEXED = "indexed"
-    FAILED = "failed"
-
-
 class ComplianceSessionStatus(enum.StrEnum):
     DRAFT = "draft"
     QUEUED = "queued"
@@ -49,7 +43,7 @@ class ComplianceSessionStatus(enum.StrEnum):
     CHANGES_PROPOSED = "changes_proposed"
     WAITING_FOR_APPROVAL = "waiting_for_approval"
     READY_TO_PUBLISH = "ready_to_publish"
-    NEEDS_REVIEW = "needs_review"
+    REVIEW_COMPLETE = "review_complete"
     PUBLISHED = "published"
     FAILED = "failed"
 
@@ -109,7 +103,6 @@ class PolicyVersion(Base):
     effective_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    index_status: Mapped[str] = mapped_column(String(24), default=IndexStatus.PENDING.value)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
@@ -258,7 +251,6 @@ class ComplianceFinding(Base):
     evidence_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reason: Mapped[str] = mapped_column(Text)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
-    resolved: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     policy_version: Mapped[PolicyVersion] = relationship()
@@ -285,35 +277,16 @@ class ProposedChange(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
-class HumanReview(Base):
-    __tablename__ = "human_reviews"
+class RevisionDecision(Base):
+    __tablename__ = "revision_decisions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     session_id: Mapped[str] = mapped_column(
         ForeignKey("compliance_sessions.id", ondelete="CASCADE"), index=True
     )
-    reviewer_name: Mapped[str] = mapped_column(String(160))
+    recruiter_name: Mapped[str] = mapped_column(String(160))
     decision: Mapped[str] = mapped_column(String(40))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    finding_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-
-
-class ReviewedPrecedent(Base):
-    __tablename__ = "reviewed_precedents"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    human_review_id: Mapped[str] = mapped_column(
-        ForeignKey("human_reviews.id", ondelete="CASCADE"), unique=True
-    )
-    excerpt: Mapped[str] = mapped_column(Text)
-    decision: Mapped[str] = mapped_column(String(40))
-    jurisdiction: Mapped[str] = mapped_column(String(80), index=True)
-    category: Mapped[str] = mapped_column(String(80), index=True)
-    policy_version_id: Mapped[str] = mapped_column(
-        ForeignKey("policy_versions.id", ondelete="RESTRICT")
-    )
-    index_status: Mapped[str] = mapped_column(String(24), default=IndexStatus.PENDING.value)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 

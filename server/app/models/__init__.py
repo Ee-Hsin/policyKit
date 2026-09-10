@@ -6,7 +6,6 @@ from app.models.entities import (
     ComplianceFinding,
     ComplianceSession,
     EvalCase,
-    HumanReview,
     JobPosting,
     Policy,
     PolicySnapshot,
@@ -14,7 +13,7 @@ from app.models.entities import (
     PolicyVersion,
     PostingVersion,
     ProposedChange,
-    ReviewedPrecedent,
+    RevisionDecision,
 )
 
 __all__ = [
@@ -23,7 +22,6 @@ __all__ = [
     "ComplianceFinding",
     "ComplianceSession",
     "EvalCase",
-    "HumanReview",
     "JobPosting",
     "Policy",
     "PolicySnapshot",
@@ -31,5 +29,5 @@ __all__ = [
     "PolicyVersion",
     "PostingVersion",
     "ProposedChange",
-    "ReviewedPrecedent",
+    "RevisionDecision",
 ]

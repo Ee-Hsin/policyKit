@@ -6,7 +6,6 @@ import logging
 from app.agent.runtime import ComplianceAgent
 from app.core.config import Settings
 from app.core.database import SessionFactory
-from app.integrations.chroma import ChromaIndex
 from app.integrations.openai_gateway import OpenAIGateway
 from app.models.entities import ComplianceSessionStatus, StepStatus
 from app.repositories import sessions as session_repository
@@ -49,7 +48,7 @@ class AgentWorker:
                 return False
             try:
                 ai = OpenAIGateway(self.settings)
-                agent = ComplianceAgent(self.settings, ai, ChromaIndex(self.settings, ai))
+                agent = ComplianceAgent(self.settings, ai)
                 await agent.run(db, session.id)
             except Exception as error:
                 logger.exception("Compliance agent failed for session %s", session.id)

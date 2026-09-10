@@ -30,50 +30,12 @@ AGENT_TOOLS = [
     },
     {
         "type": "function",
-        "name": "search_policies",
-        "description": (
-            "Search indexed policy passages when a finding needs deeper investigation. Search "
-            "is supporting research and does not replace the full compliance check."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "minLength": 3},
-                "category": {"type": ["string", "null"]},
-                "jurisdiction": {"type": ["string", "null"]},
-            },
-            "required": ["query", "category", "jurisdiction"],
-            "additionalProperties": False,
-        },
-        "strict": True,
-    },
-    {
-        "type": "function",
         "name": "read_policy",
         "description": "Read one complete canonical policy from PostgreSQL by stable policy key.",
         "parameters": {
             "type": "object",
             "properties": {"policy_key": {"type": "string"}},
             "required": ["policy_key"],
-            "additionalProperties": False,
-        },
-        "strict": True,
-    },
-    {
-        "type": "function",
-        "name": "search_reviewed_precedents",
-        "description": (
-            "Find similar cases that a human reviewer approved. Use only for ambiguous language; "
-            "a precedent is evidence, not an automatic verdict."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "minLength": 3},
-                "category": {"type": ["string", "null"]},
-                "jurisdiction": {"type": ["string", "null"]},
-            },
-            "required": ["query", "category", "jurisdiction"],
             "additionalProperties": False,
         },
         "strict": True,
@@ -139,10 +101,10 @@ AGENT_TOOLS = [
     },
     {
         "type": "function",
-        "name": "escalate_to_reviewer",
+        "name": "finish_with_findings",
         "description": (
-            "Stop and request human policy judgment when evidence conflicts, a rule is ambiguous, "
-            "or no safe revision can preserve the posting's meaning."
+            "Finish the review with unresolved findings when a safe revision requires a recruiter "
+            "decision, a policy remains ambiguous, or no applicable policy is configured."
         ),
         "parameters": {
             "type": "object",
