@@ -16,6 +16,33 @@ import type { ComplianceSession, Finding, SessionStatus } from "@/lib/types";
 
 type ChangeDecision = "accepted" | "rejected";
 
+const runningStatuses = new Set<SessionStatus>([
+  "draft",
+  "queued",
+  "investigating",
+  "changes_proposed",
+]);
+
+const activityLabels: Record<string, string> = {
+  "Agent selected its next action": "Selected the next review step",
+  "Checked all applicable policies": "Compared the posting with every applicable policy",
+  search_policies: "Reviewed the policies behind a finding",
+  read_policy: "Read the full policy text",
+  search_reviewed_precedents: "Checked similar reviewed cases",
+  propose_revision: "Prepared focused changes for your review",
+  "Recruiter reviewed proposed changes": "Applied your edit decisions",
+  "Recruiter answered": "Added the recruiter information",
+};
+
+function activityLabel(name: string) {
+  return activityLabels[name] ?? name.replaceAll("_", " ");
+}
+
+function formatElapsed(seconds: number) {
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
 function AnnotatedPosting({ content, findings }: { content: string; findings: Finding[] }) {
   const annotations = findings
     .filter(
@@ -117,6 +144,19 @@ function ReviewPanel({
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const reviewIsRunning = runningStatuses.has(session.status);
+  const timerIsRunning = reviewIsRunning && session.status !== "draft";
+
+  useEffect(() => {
+    if (!timerIsRunning) return;
+    const startedAt = Date.now();
+    setElapsedSeconds(0);
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [timerIsRunning]);
 
   async function run(action: () => Promise<ComplianceSession>) {
     setBusy(true);
@@ -149,6 +189,15 @@ function ReviewPanel({
       step.status === "completed" &&
       step.input_data.posting_version === session.current_posting_version.version,
   );
+  const recentActivity = session.steps
+    .filter((step) => step.status === "completed")
+    .slice(-3)
+    .reverse();
+  const currentActivity = session.status === "queued"
+    ? "Waiting for the review worker to begin."
+    : policiesChecked
+      ? "Reviewing the findings and preparing the next safe action."
+      : "Comparing this posting with the complete applicable policy set.";
   const progressSteps = [
     {
       label: reviewStarted ? "Review started" : "Starting review",
@@ -245,20 +294,47 @@ function ReviewPanel({
         <section className="review-action review-action--pending" role="status">
           <h2>{session.status === "draft" ? "Review not started" : session.status === "queued" ? "Review queued" : "Review in progress"}</h2>
           {session.status !== "draft" ? (
-            <ol className="review-steps">
-              {progressSteps.map((step) => (
-                <li className={`review-step review-step--${step.state}`} key={step.label}>
-                  {step.state === "active" ? (
-                    <span className="spinner" aria-hidden="true" />
-                  ) : (
-                    <span className="review-step__indicator" aria-hidden="true">
-                      {step.state === "complete" ? "✓" : ""}
-                    </span>
-                  )}
-                  <span>{step.label}</span>
-                </li>
-              ))}
-            </ol>
+            <>
+              <ol className="review-steps">
+                {progressSteps.map((step) => (
+                  <li className={`review-step review-step--${step.state}`} key={step.label}>
+                    {step.state === "active" ? (
+                      <span className="spinner" aria-hidden="true" />
+                    ) : (
+                      <span className="review-step__indicator" aria-hidden="true">
+                        {step.state === "complete" ? "✓" : ""}
+                      </span>
+                    )}
+                    <span>{step.label}</span>
+                  </li>
+                ))}
+              </ol>
+              <div className="review-activity">
+                <div className="review-activity__heading">
+                  <span>Live activity</span>
+                  <span aria-hidden="true">{formatElapsed(elapsedSeconds)}</span>
+                </div>
+                <p className="review-activity__current">{currentActivity}</p>
+                <div className="review-activity__meta">
+                  {session.policy_snapshot_version ? (
+                    <span>Policy set v{session.policy_snapshot_version}</span>
+                  ) : null}
+                  <span>{session.steps.length} {session.steps.length === 1 ? "step" : "steps"} recorded</span>
+                </div>
+                {recentActivity.length ? (
+                  <ul className="review-activity__history">
+                    {recentActivity.map((step) => (
+                      <li key={step.id}>
+                        <span aria-hidden="true">✓</span>
+                        {activityLabel(step.name)}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="review-activity__waiting">Completed actions will appear here.</p>
+                )}
+              </div>
+            </>
           ) : null}
         </section>
       ) : null}
@@ -332,8 +408,7 @@ export default function SessionPage() {
 
   const activeChanges = session.proposed_changes.filter((change) => change.status === "proposed");
   const reviewingChanges = session.status === "waiting_for_approval";
-  const reviewIsRunning = (["draft", "queued", "investigating", "changes_proposed"] as SessionStatus[])
-    .includes(session.status);
+  const reviewIsRunning = runningStatuses.has(session.status);
   const sourcePostingVersionId = activeChanges[0]?.from_posting_version_id;
   const sourcePosting = session.posting_versions.find(
     (version) => version.id === sourcePostingVersionId,

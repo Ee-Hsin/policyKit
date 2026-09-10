@@ -67,23 +67,6 @@ export default function NewReviewPage() {
             company policies and local laws.
           </p>
         </div>
-        <div className="review-workspace__actions">
-          <button
-            className="button button--secondary"
-            type="button"
-            onClick={loadExample}
-          >
-            Load Example
-          </button>
-          <button
-            className="button button--primary"
-            type="submit"
-            form="job-post-review"
-            disabled={submitting}
-          >
-            {submitting ? "Checking Post…" : "Check Job Post"}
-          </button>
-        </div>
       </header>
 
       <section
@@ -109,9 +92,19 @@ export default function NewReviewPage() {
               />
             </label>
 
-            <label className="field field--editor review-document-editor__body">
-              <span>Job description</span>
+            <div className="field field--editor review-document-editor__body">
+              <div className="review-document-editor__field-heading">
+                <label htmlFor="job-description">Job description</label>
+                <button
+                  className="load-example-button"
+                  type="button"
+                  onClick={loadExample}
+                >
+                  Load example
+                </button>
+              </div>
               <textarea
+                id="job-description"
                 required
                 minLength={30}
                 maxLength={100000}
@@ -119,7 +112,7 @@ export default function NewReviewPage() {
                 onChange={(event) => setDescription(event.target.value)}
                 placeholder="Paste the full job posting here..."
               />
-            </label>
+            </div>
           </div>
 
           <aside
@@ -167,6 +160,16 @@ export default function NewReviewPage() {
                 {error}
               </div>
             ) : null}
+
+            <div className="review-submit">
+              <button
+                className="button button--primary button--full"
+                type="submit"
+                disabled={submitting}
+              >
+                {submitting ? "Checking Post…" : "Check Job Post"}
+              </button>
+            </div>
           </aside>
         </form>
       </section>

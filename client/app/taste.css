@@ -152,10 +152,6 @@ body {
 }
 
 .review-workspace__header {
-  align-items: center;
-  display: flex;
-  gap: 24px;
-  justify-content: space-between;
   margin-bottom: 16px;
 }
 
@@ -171,12 +167,6 @@ body {
   color: var(--ink-soft);
   font-size: 14px;
   margin: 0;
-}
-
-.review-workspace__actions {
-  display: flex;
-  flex-shrink: 0;
-  gap: 10px;
 }
 
 .composer-card {
@@ -223,6 +213,34 @@ body {
   margin-top: 24px;
 }
 
+.review-document-editor__field-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.review-document-editor__field-heading label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.load-example-button {
+  background: transparent;
+  border: 0;
+  color: var(--green);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 0;
+}
+
+.load-example-button:hover {
+  color: var(--green-dark);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .field--editor.review-document-editor__body textarea {
   background: transparent;
   border-radius: 10px;
@@ -250,6 +268,12 @@ body {
   font-size: 20px;
   letter-spacing: -0.025em;
   margin: 0;
+}
+
+.review-submit {
+  border-top: 1px solid var(--line);
+  margin-top: auto;
+  padding-top: 24px;
 }
 
 .field {
@@ -654,8 +678,8 @@ body {
 .session-grid {
   align-items: start;
   display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(0, 1.55fr) minmax(380px, 0.85fr);
+  gap: 24px;
+  grid-template-columns: minmax(0, 1.45fr) minmax(420px, 1fr);
   margin-top: 18px;
 }
 
@@ -695,9 +719,10 @@ body {
 .session-sidebar {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
   max-height: calc(100vh - 88px);
   overflow-y: auto;
+  padding-bottom: 24px;
   position: sticky;
   scrollbar-gutter: stable;
   top: 76px;
@@ -713,7 +738,7 @@ body {
 }
 
 .review-action {
-  padding: 20px;
+  padding: clamp(24px, 2vw, 30px);
 }
 
 .review-action h2 {
@@ -790,6 +815,81 @@ body {
   color: white;
 }
 
+.review-activity {
+  background: #f4f3ee;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  margin-top: 20px;
+  padding: 16px;
+}
+
+.review-activity__heading {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 10px;
+  font-weight: 800;
+  justify-content: space-between;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.review-action .review-activity__current {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+  margin: 10px 0 0;
+}
+
+.review-activity__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.review-activity__meta span {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 4px 7px;
+}
+
+.review-activity__history {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 12px 0 0;
+}
+
+.review-activity__history li {
+  align-items: flex-start;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 10px;
+  gap: 7px;
+  line-height: 1.45;
+}
+
+.review-activity__history li span {
+  color: var(--green);
+  font-weight: 800;
+}
+
+.review-action .review-activity__waiting {
+  border-top: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 10px;
+  margin: 14px 0 0;
+  padding-top: 12px;
+}
+
 .review-action--success {
   background: var(--mint-soft);
 }
@@ -799,7 +899,7 @@ body {
 }
 
 .policy-results {
-  padding: 20px;
+  padding: clamp(24px, 2vw, 30px);
 }
 
 .policy-results__heading {
@@ -882,7 +982,7 @@ body {
 }
 
 .revision-review {
-  padding: 20px;
+  padding: clamp(24px, 2vw, 30px);
 }
 
 .revision-review__heading {
@@ -1204,7 +1304,7 @@ body {
   margin-top: 18px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1050px) {
   .session-grid {
     grid-template-columns: 1fr;
   }
@@ -1293,19 +1393,8 @@ body {
     padding: 23px 18px;
   }
 
-  .review-workspace__header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
   .review-workspace__header p {
     max-width: 440px;
-  }
-
-  .review-workspace__actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    width: 100%;
   }
 
   .review-composer {
