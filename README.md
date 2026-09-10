@@ -4,30 +4,20 @@ PolicyKit is a pre-publication compliance agent for job postings. It investigate
 draft, checks the complete applicable policy set, asks for missing facts, proposes exact
 edits, and stops for human approval before publication.
 
-![PolicyKit recruiter experience](docs/images/policykit-home.png)
-
-The main design rule is simple: the model chooses the next investigation action, while
-Python controls what the action can do. OpenAI cannot access the database, edit a policy,
-approve its own revision, or publish a posting.
-
 ## What the product does
 
-A recruiter enters a job description, hiring locations, employer, and employment type.
-PolicyKit then:
+A recruiter enters a job description and additional information such as the hiring
+locations and employment type. PolicyKit then:
 
-1. Resolves the locations to canonical jurisdictions such as `US`, `US-NY`, or `GB`.
-2. Pins the session to an immutable PostgreSQL policy snapshot.
-3. Gives the agent only the tools that are valid for the current session state.
-4. Runs a typed classifier against every applicable policy, not a retrieved sample.
-5. Validates full policy coverage and every quoted evidence offset in Python.
-6. Asks one focused question when required information is missing.
-7. Builds any proposed revision from declared edits on the server.
-8. Keeps the original flagged text visible while the recruiter accepts or rejects each edit.
-9. Builds a draft from the accepted edits and checks that draft again. Rejected edits return
-   to the agent as feedback.
-10. Re-runs the deterministic publication gate before recording publication.
-
-![Flagged text, proposed edits, and individual review decisions](docs/images/policykit-review.png)
+1. Determines which policies apply from the information provided.
+2. Checks the posting against every applicable policy.
+3. Highlights problematic text, explains each finding, and proposes exact edits.
+4. Lets the recruiter accept or reject each edit and optionally explain rejected edits.
+5. Applies the accepted edits and checks the revised posting again. Rejected edits and
+recruiter feedback return to the agent for the next review cycle.
+6. Lets the recruiter publish regardless of the review outcome. If PolicyKit has not
+cleared the posting, the recruiter must provide an explanation, which is stored in
+the audit trail.
 
 ## System architecture
 
