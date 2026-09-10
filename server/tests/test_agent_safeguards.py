@@ -7,6 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.runtime import AgentToolError, AgentToolExecutor, ComplianceAgent, build_agent_state
 from app.core.config import Settings
 from app.integrations.chroma import SemanticMatch
+from app.integrations.openai_gateway import (
+    AIResponseAttempt,
+    IncompleteClassifierResponseError,
+)
 from app.models.entities import (
     AgentStep,
     ComplianceCacheEntry,
@@ -60,10 +64,9 @@ async def compliance_session(db: AsyncSession, snapshot: PolicySnapshot):
             ),
             target_locations=["New York"],
         ),
+        snapshot,
     )
-    session.policy_snapshot_id = snapshot.id
     session.status = ComplianceSessionStatus.INVESTIGATING.value
-    session.started_at = session.created_at
     await db.commit()
     return await session_repository.get_session(db, session.id)
 
@@ -180,6 +183,62 @@ async def test_executor_rejects_a_tool_not_offered_for_the_current_state(
     assert session.status == ComplianceSessionStatus.INVESTIGATING.value
 
 
+async def test_incomplete_classifier_response_stops_without_another_agent_retry(
+    db: AsyncSession,
+) -> None:
+    snapshot = await policy_snapshot(db)
+    session = await compliance_session(db, snapshot)
+    ai = FakeAI()
+
+    async def incomplete_check(**_kwargs):
+        raise IncompleteClassifierResponseError(
+            [
+                AIResponseAttempt(
+                    response_id="response-1",
+                    status="incomplete",
+                    incomplete_reason="max_output_tokens",
+                    input_tokens=100,
+                    output_tokens=12_000,
+                    max_output_tokens=12_000,
+                    policy_count=2,
+                ),
+                AIResponseAttempt(
+                    response_id="response-2",
+                    status="incomplete",
+                    incomplete_reason="max_output_tokens",
+                    input_tokens=100,
+                    output_tokens=24_000,
+                    max_output_tokens=24_000,
+                    policy_count=2,
+                ),
+            ]
+        )
+
+    ai.check_compliance = incomplete_check
+    executor = AgentToolExecutor(
+        db,
+        session,
+        ai,
+        FakeIndex(),
+        allowed_tool_names={"run_compliance_check"},
+    )
+
+    result = await executor.execute("run_compliance_check", {})
+    stored = await session_repository.get_session(db, session.id)
+    steps = await session_repository.steps_for_session(db, session.id)
+
+    assert result == {
+        "error": "Classifier reached the output token limit after one larger retry",
+        "retryable": False,
+    }
+    assert stored.status == ComplianceSessionStatus.FAILED.value
+    assert stored.error_message == result["error"]
+    assert steps[-1].output_data["incomplete_reason"] == "max_output_tokens"
+    assert steps[-1].output_data["response_id"] == "response-2"
+    assert steps[-1].input_tokens == 200
+    assert steps[-1].output_tokens == 36_000
+
+
 async def test_agent_state_includes_steps_added_after_the_session_was_loaded(
     db: AsyncSession,
 ) -> None:
@@ -275,23 +334,6 @@ async def test_completion_uses_the_session_start_time_for_an_expiring_policy(
     result = await executor.execute("complete_session", {"summary": "Ready to publish"})
 
     assert result["status"] == ComplianceSessionStatus.READY_TO_PUBLISH.value
-
-
-async def test_policy_applicability_uses_the_explicit_check_start_time(
-    db: AsyncSession,
-) -> None:
-    snapshot = await policy_snapshot(db, count=1)
-    session = await compliance_session(db, snapshot)
-    pinned_snapshot = await policy_repository.get_snapshot(db, snapshot.id)
-    session.started_at = session.created_at + timedelta(minutes=2)
-    pinned_snapshot.items[0].policy_version.effective_at = session.created_at + timedelta(minutes=1)
-    await db.commit()
-    ai = FakeAI(output_factory=output_factory({}))
-
-    result = await run_compliance_check(db, session, ai)
-
-    assert len(result.policies) == 1
-    assert result.policies[0].id == pinned_snapshot.items[0].policy_version_id
 
 
 async def test_completion_rejects_findings_from_a_previous_location_scope(
@@ -414,7 +456,6 @@ async def test_human_approval_records_and_resolves_reviewed_findings(
     review = await session_repository.add_human_review(
         db,
         session,
-        base_version_id=session.current_posting_version_id,
         reviewer_name="Policy reviewer",
         decision="approve",
         notes="Approved as an explicit policy exception.",
@@ -450,7 +491,6 @@ async def test_human_review_rechecks_status_inside_the_write_transaction(
         await session_repository.add_human_review(
             db,
             session,
-            base_version_id=session.current_posting_version_id,
             reviewer_name="Stale reviewer",
             decision="approve",
             notes=None,

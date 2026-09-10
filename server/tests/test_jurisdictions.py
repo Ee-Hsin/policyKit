@@ -18,6 +18,7 @@ from app.services.jurisdictions import normalize_location, resolve_jurisdictions
         ("New York, NY", "US-NY"),
         ("London, UK", "GB"),
         ("Toronto, Canada", "CA"),
+        ("CA", "CA"),
         ("gb", "GB"),
         ("US-wa", "US-WA"),
         ("Global", "UNRESOLVED:Global"),

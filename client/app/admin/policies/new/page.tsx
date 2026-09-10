@@ -25,18 +25,19 @@ export default function NewPolicyPage() {
   }
 
   return (
-    <div className="page-shell admin-shell admin-shell--editor">
-      <div className="editor-header">
+    <div className="page-shell admin-shell admin-shell--editor policy-editor-page">
+      <header className="simple-editor-header">
         <div>
           <Link className="back-link" href="/admin/policies">← All policies</Link>
-          <p className="kicker">New policy</p>
-          <h1>Create a policy draft</h1>
-          <p>Define a versioned rule, its scope, and examples the agent can use during investigation.</p>
+          <h1>Create policy</h1>
+          <p>New policy draft</p>
         </div>
-        <span className="status-pill status-pill--warning">Draft</span>
-      </div>
+        <button className="button button--primary" disabled={submitting} form="new-policy-form" type="submit">
+          {submitting ? "Creating…" : "Create policy"}
+        </button>
+      </header>
       {error ? <div className="alert alert--error" role="alert">{error}</div> : null}
-      <PolicyForm create submitting={submitting} submitLabel="Create policy" onSubmit={submit} />
+      <PolicyForm create formId="new-policy-form" submitting={submitting} submitLabel="Create policy" onSubmit={submit} />
     </div>
   );
 }

@@ -1,15 +1,9 @@
 import type {
   ComplianceSession,
-  DraftAssistanceInput,
-  DraftAssistanceResult,
-  HumanReviewInput,
   PolicyCreateInput,
   PolicyDetail,
   PolicyDraftInput,
   PolicySummary,
-  PostingVersionInput,
-  WritingSuggestionInput,
-  WritingSuggestionResult,
 } from "@/lib/types";
 
 export const API_BASE_URL = (
@@ -38,13 +32,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let message = "PolicyKit could not complete the request.";
     try {
       const payload = (await response.json()) as {
-        detail?: string | Array<{ msg?: string }>;
+        detail?: string | Array<{ loc?: Array<string | number>; msg?: string }>;
       };
       if (typeof payload.detail === "string") {
         message = payload.detail;
       } else if (Array.isArray(payload.detail)) {
-        const validationMessages = payload.detail.flatMap((item) => item.msg ?? []);
-        if (validationMessages.length) message = validationMessages.join(" ");
+        message = payload.detail
+          .map((item) => {
+            const field = item.loc?.at(-1);
+            return [field, item.msg].filter(Boolean).join(": ");
+          })
+          .filter(Boolean)
+          .join(" ");
       }
     } catch {
       // The fallback message is clear when the API does not return JSON.
@@ -69,71 +68,32 @@ export function createSession(input: {
   });
 }
 
-export function createAssistedDraft(input: DraftAssistanceInput) {
-  return request<DraftAssistanceResult>("/writing-assistance/drafts", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-}
-
 export function getSession(id: string) {
   return request<ComplianceSession>(`/compliance-sessions/${id}`);
 }
 
-export function savePostingVersion(id: string, input: PostingVersionInput) {
-  return request<ComplianceSession>(`/compliance-sessions/${id}/posting-versions`, {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-}
-
-export function checkSession(id: string, baseVersionId: string) {
-  return request<ComplianceSession>(`/compliance-sessions/${id}/check`, {
-    method: "POST",
-    body: JSON.stringify({ base_version_id: baseVersionId }),
-  });
-}
-
-export function requestWritingSuggestion(id: string, input: WritingSuggestionInput) {
-  return request<WritingSuggestionResult>(`/compliance-sessions/${id}/writing-suggestions`, {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-}
-
-export function answerSession(id: string, baseVersionId: string, message: string) {
+export function answerSession(id: string, message: string) {
   return request<ComplianceSession>(`/compliance-sessions/${id}/messages`, {
     method: "POST",
-    body: JSON.stringify({ base_version_id: baseVersionId, message }),
+    body: JSON.stringify({ message }),
   });
 }
 
-export function approveRevision(id: string, baseVersionId: string, approved: boolean, notes?: string) {
+export function approveRevision(
+  id: string,
+  decisions: { change_id: string; approved: boolean }[],
+  notes?: string,
+) {
   return request<ComplianceSession>(`/compliance-sessions/${id}/approve`, {
     method: "POST",
-    body: JSON.stringify({
-      base_version_id: baseVersionId,
-      approved,
-      reviewer_name: "Demo recruiter",
-      notes: notes || null,
-    }),
+    body: JSON.stringify({ decisions, reviewer_name: "Demo recruiter", notes: notes || null }),
   });
 }
 
-export function publishSession(id: string, baseVersionId: string) {
+export function publishSession(id: string) {
   return request<ComplianceSession>(`/compliance-sessions/${id}/publish`, {
     method: "POST",
-    body: JSON.stringify({
-      base_version_id: baseVersionId,
-      publisher_name: "Demo recruiter",
-    }),
-  });
-}
-
-export function resolveHumanReview(id: string, input: HumanReviewInput) {
-  return request<ComplianceSession>(`/reviews/${id}`, {
-    method: "POST",
-    body: JSON.stringify(input),
+    body: JSON.stringify({ publisher_name: "Demo recruiter" }),
   });
 }
 

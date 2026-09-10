@@ -8,7 +8,6 @@ export type SessionStatus =
   | "ready_to_publish"
   | "needs_review"
   | "published"
-  | "rejected"
   | "failed";
 
 export interface AgentStep {
@@ -39,8 +38,17 @@ export interface Finding {
   resolved: boolean;
 }
 
+export type PolicyCategory =
+  | "Discrimination"
+  | "Compensation"
+  | "Employment status"
+  | "Transparency"
+  | "Content";
+
 export interface ProposedChange {
   id: string;
+  from_posting_version_id: string;
+  to_posting_version_id: string;
   original_text: string;
   replacement_text: string;
   reason: string;
@@ -53,40 +61,9 @@ export interface PostingVersion {
   id: string;
   version: number;
   content: string;
-  source: "user" | "recruiter" | "agent" | string;
+  source: string;
   approved_at: string | null;
   created_at: string;
-}
-
-export interface DraftAssistanceInput {
-  title: string;
-  role_ideas: string;
-  organization_name?: string;
-  target_locations?: string[];
-  employment_type?: string;
-}
-
-export interface DraftAssistanceResult {
-  suggested_content: string;
-}
-
-export interface PostingVersionInput {
-  base_version_id: string;
-  content: string;
-}
-
-export interface WritingSuggestionInput {
-  base_version_id: string;
-  draft_text: string;
-  instruction: string;
-  selection_start?: number;
-  selection_end?: number;
-}
-
-export interface WritingSuggestionResult {
-  base_version_id: string;
-  suggested_text: string;
-  summary: string;
 }
 
 export interface ComplianceSession {
@@ -101,8 +78,6 @@ export interface ComplianceSession {
   current_question: string | null;
   error_message: string | null;
   policy_snapshot_version: number | null;
-  check_state: "never_run" | "running" | "current" | "stale";
-  last_checked_posting_version_id: string | null;
   current_posting_version: PostingVersion;
   posting_versions: PostingVersion[];
   findings: Finding[];
@@ -111,15 +86,6 @@ export interface ComplianceSession {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
-}
-
-export interface HumanReviewInput {
-  base_version_id: string;
-  reviewer_name: string;
-  decision: "approve" | "reject" | "request_changes";
-  notes?: string;
-  promote_to_precedent?: boolean;
-  finding_id?: string;
 }
 
 export interface PolicyVersionFields {
@@ -151,7 +117,7 @@ export interface PolicySummary {
   id: string;
   key: string;
   title: string;
-  category: string;
+  category: PolicyCategory;
   current_version: number;
   status: string;
   index_status: string;
@@ -163,17 +129,17 @@ export interface PolicyDetail {
   id: string;
   key: string;
   title: string;
-  category: string;
+  category: PolicyCategory;
   versions: PolicyVersion[];
 }
 
 export interface PolicyDraftInput extends PolicyVersionFields {
   title?: string;
-  category?: string;
+  category?: PolicyCategory;
 }
 
 export interface PolicyCreateInput extends PolicyVersionFields {
   key: string;
   title: string;
-  category: string;
+  category: PolicyCategory;
 }

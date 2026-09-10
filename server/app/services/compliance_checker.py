@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from time import monotonic
 
 from pydantic import ValidationError
@@ -108,7 +108,7 @@ async def run_compliance_check(
         jurisdictions=jurisdictions,
         employment_type=session.posting.employment_type,
         platform=session.posting.platform,
-        at=session.started_at or session.created_at,
+        at=session.created_at,
     )
     if not policies:
         raise InvalidComplianceOutputError("No applicable policies were found")
@@ -141,10 +141,14 @@ async def run_compliance_check(
         output = model_result.output
         normalize_evidence_offsets(session.current_posting_version.content, output)
         response_id = model_result.response_id
+        response_ids = model_result.response_ids or [response_id]
+        model_attempts = [asdict(attempt) for attempt in model_result.attempts]
         input_tokens = model_result.input_tokens
         output_tokens = model_result.output_tokens
     else:
         response_id = "exact-cache"
+        response_ids = [response_id]
+        model_attempts = []
         input_tokens = 0
         output_tokens = 0
     duration_ms = round((monotonic() - started) * 1_000)
@@ -181,7 +185,6 @@ async def run_compliance_check(
         name="Checked all applicable policies",
         input_data={
             "posting_version": session.current_posting_version.version,
-            "posting_version_id": session.current_posting_version_id,
             "policy_keys": [policy.policy.key for policy in policies],
         },
         output_data={
@@ -189,6 +192,8 @@ async def run_compliance_check(
             "violation_count": sum(finding.status == "violation" for finding in findings),
             "uncertain_count": sum(finding.status == "uncertain" for finding in findings),
             "response_id": response_id,
+            "response_ids": response_ids,
+            "model_attempts": model_attempts,
             "cache_hit": cached is not None,
         },
         duration_ms=duration_ms,

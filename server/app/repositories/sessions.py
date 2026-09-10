@@ -16,6 +16,7 @@ from app.models.entities import (
     ComplianceSessionStatus,
     HumanReview,
     JobPosting,
+    PolicySnapshot,
     PolicyVersion,
     PostingVersion,
     ProposedChange,
@@ -31,19 +32,9 @@ class SessionNotFoundError(LookupError):
     pass
 
 
-EDITABLE_SESSION_STATUSES = {
-    ComplianceSessionStatus.DRAFT.value,
-    ComplianceSessionStatus.WAITING_FOR_INFORMATION.value,
-    ComplianceSessionStatus.CHANGES_PROPOSED.value,
-    ComplianceSessionStatus.WAITING_FOR_APPROVAL.value,
-    ComplianceSessionStatus.READY_TO_PUBLISH.value,
-    ComplianceSessionStatus.NEEDS_REVIEW.value,
-    ComplianceSessionStatus.REJECTED.value,
-    ComplianceSessionStatus.FAILED.value,
-}
-
-
-async def create_session(db: AsyncSession, data: ComplianceSessionCreate) -> ComplianceSession:
+async def create_session(
+    db: AsyncSession, data: ComplianceSessionCreate, snapshot: PolicySnapshot
+) -> ComplianceSession:
     posting = JobPosting(
         title=data.title,
         organization_name=data.organization_name,
@@ -58,172 +49,14 @@ async def create_session(db: AsyncSession, data: ComplianceSessionCreate) -> Com
     session = ComplianceSession(
         posting_id=posting.id,
         current_posting_version_id=original.id,
-        status=ComplianceSessionStatus.DRAFT.value,
+        policy_snapshot_id=snapshot.id,
+        status=ComplianceSessionStatus.QUEUED.value,
         goal=(
             "Prepare this job posting for publication while preserving its meaning and "
             "satisfying every applicable platform policy."
         ),
     )
     db.add(session)
-    await db.commit()
-    return await get_session(db, session.id)
-
-
-async def _lock_session(db: AsyncSession, session_id: str) -> ComplianceSession:
-    statement = (
-        select(ComplianceSession)
-        .where(ComplianceSession.id == session_id)
-        .options(
-            selectinload(ComplianceSession.posting).selectinload(JobPosting.versions),
-            selectinload(ComplianceSession.current_posting_version),
-            selectinload(ComplianceSession.policy_snapshot),
-            selectinload(ComplianceSession.steps),
-        )
-        .execution_options(populate_existing=True)
-    )
-    if db.bind and db.bind.dialect.name == "postgresql":
-        statement = statement.with_for_update()
-    session = await db.scalar(statement)
-    if not session:
-        raise SessionNotFoundError(session_id)
-    return session
-
-
-def _validate_current_base(session: ComplianceSession, base_version_id: str) -> None:
-    if session.current_posting_version_id != base_version_id:
-        raise ValueError("The posting changed after this draft was loaded")
-
-
-def last_checked_posting_version_id(
-    session: ComplianceSession, steps: Sequence[AgentStep]
-) -> str | None:
-    versions_by_number = {version.version: version.id for version in session.posting.versions}
-    for step in reversed(steps):
-        if step.kind != "compliance_check":
-            continue
-        version_id = step.input_data.get("posting_version_id")
-        if isinstance(version_id, str):
-            return version_id
-        version_number = step.input_data.get("posting_version")
-        if isinstance(version_number, int):
-            return versions_by_number.get(version_number)
-    return None
-
-
-async def validate_writing_base(db: AsyncSession, session_id: str, base_version_id: str) -> None:
-    row = (
-        await db.execute(
-            select(
-                ComplianceSession.status,
-                ComplianceSession.current_posting_version_id,
-            ).where(ComplianceSession.id == session_id)
-        )
-    ).one_or_none()
-    if not row:
-        raise SessionNotFoundError(session_id)
-    if row.status not in EDITABLE_SESSION_STATUSES:
-        raise ValueError("Writing assistance is not available in the current state")
-    if row.current_posting_version_id != base_version_id:
-        raise ValueError("The posting changed after this draft was loaded")
-
-
-async def create_user_posting_version(
-    db: AsyncSession,
-    session_id: str,
-    *,
-    base_version_id: str,
-    content: str,
-) -> ComplianceSession:
-    session = await _lock_session(db, session_id)
-    if session.status not in EDITABLE_SESSION_STATUSES:
-        raise ValueError("The posting cannot be edited in its current state")
-    _validate_current_base(session, base_version_id)
-    current = await db.scalar(
-        select(PostingVersion)
-        .where(PostingVersion.id == session.current_posting_version_id)
-        .execution_options(populate_existing=True)
-    )
-    if not current:
-        raise ValueError("The current posting version does not exist")
-    if current.content == content:
-        raise ValueError("The saved draft is unchanged")
-    latest_version_number = (
-        await db.scalar(
-            select(func.max(PostingVersion.version)).where(
-                PostingVersion.posting_id == session.posting_id
-            )
-        )
-        or 0
-    )
-    saved = PostingVersion(
-        posting_id=session.posting_id,
-        version=latest_version_number + 1,
-        content=content,
-        source="recruiter",
-    )
-    db.add(saved)
-    session.posting.versions.append(saved)
-    await db.flush()
-    await db.execute(
-        update(ProposedChange)
-        .where(
-            ProposedChange.session_id == session.id,
-            ProposedChange.status == ChangeStatus.PROPOSED.value,
-        )
-        .values(status=ChangeStatus.REJECTED.value)
-    )
-    session.current_posting_version_id = saved.id
-    session.current_posting_version = saved
-    session.status = ComplianceSessionStatus.DRAFT.value
-    session.current_question = None
-    session.error_message = None
-    session.completed_at = None
-    await add_step(
-        db,
-        session.id,
-        kind="user_edit",
-        name="Recruiter saved a new posting version",
-        input_data={"from_posting_version": current.version},
-        output_data={"posting_version": saved.version},
-    )
-    await db.commit()
-    return await get_session(db, session.id)
-
-
-async def start_compliance_check(
-    db: AsyncSession, session_id: str, *, base_version_id: str
-) -> ComplianceSession:
-    from app.repositories import policies as policy_repository
-
-    session = await _lock_session(db, session_id)
-    if session.status not in {
-        ComplianceSessionStatus.DRAFT.value,
-        ComplianceSessionStatus.FAILED.value,
-    }:
-        raise ValueError("Only a saved draft or failed check can start a compliance check")
-    _validate_current_base(session, base_version_id)
-    if session.policy_snapshot_id:
-        snapshot = await policy_repository.get_snapshot(db, session.policy_snapshot_id)
-    else:
-        snapshot = await policy_repository.get_latest_snapshot(db)
-        if not snapshot:
-            raise ValueError("Publish at least one policy before starting a compliance check")
-        session.policy_snapshot_id = snapshot.id
-        session.policy_snapshot = snapshot
-    session.status = ComplianceSessionStatus.QUEUED.value
-    session.started_at = session.started_at or utc_now()
-    session.completed_at = None
-    session.current_question = None
-    session.error_message = None
-    session.agent_iterations = 0
-    await add_step(
-        db,
-        session.id,
-        kind="user_action",
-        name="Recruiter requested a compliance check",
-        input_data={"posting_version_id": session.current_posting_version_id},
-        output_data={"policy_snapshot_version": snapshot.version},
-    )
     await db.commit()
     return await get_session(db, session.id)
 
@@ -434,72 +267,118 @@ async def create_proposed_revision(
 
 async def record_revision_decision(
     db: AsyncSession,
-    session_id: str,
+    session: ComplianceSession,
     *,
-    base_version_id: str,
-    approved: bool,
+    decisions: dict[str, bool],
     reviewer_name: str,
     notes: str | None,
 ) -> None:
-    session = await _lock_session(db, session_id)
-    if session.status != ComplianceSessionStatus.WAITING_FOR_APPROVAL.value:
-        raise ValueError("The session is not waiting for revision approval")
-    _validate_current_base(session, base_version_id)
     proposed_changes = await proposed_changes_for_session(db, session.id)
     pending = [
-        change
-        for change in proposed_changes
-        if change.status == ChangeStatus.PROPOSED.value
-        and change.to_posting_version_id == session.current_posting_version_id
+        change for change in proposed_changes if change.status == ChangeStatus.PROPOSED.value
     ]
     if not pending:
         raise ValueError("This session has no proposed changes awaiting approval")
-    status = ChangeStatus.ACCEPTED.value if approved else ChangeStatus.REJECTED.value
+    pending_by_id = {change.id: change for change in pending}
+    if set(decisions) != set(pending_by_id):
+        raise ValueError("Choose accept or reject for every proposed change")
+
+    accepted = [change for change in pending if decisions[change.id]]
+    rejected = [change for change in pending if not decisions[change.id]]
     for change in pending:
-        change.status = status
+        change.status = (
+            ChangeStatus.ACCEPTED.value if decisions[change.id] else ChangeStatus.REJECTED.value
+        )
+
+    previous_ids = {change.from_posting_version_id for change in pending}
+    if len(previous_ids) != 1:
+        raise ValueError("Proposed changes do not share the same source posting")
+    previous_id = previous_ids.pop()
+    previous = await db.get(PostingVersion, previous_id)
+    if not previous:
+        raise ValueError("The source posting for these changes is unavailable")
+
     review = HumanReview(
         session_id=session.id,
         reviewer_name=reviewer_name,
-        decision="approve" if approved else "reject",
+        decision="approve" if not rejected else "reject" if not accepted else "partial",
         notes=notes,
     )
     db.add(review)
-    if approved:
+
+    if not rejected:
         session.current_posting_version.approved_at = utc_now()
-        session.status = ComplianceSessionStatus.QUEUED.value
-    else:
-        previous_id = pending[0].from_posting_version_id
-        session.current_posting_version_id = previous_id
-        session.current_posting_version = next(
-            version for version in session.posting.versions if version.id == previous_id
-        )
-        if notes and notes.strip():
-            await add_step(
-                db,
-                session.id,
-                kind="user_message",
-                name="Recruiter requested a different revision",
-                input_data={"message": notes.strip()},
+    elif accepted:
+        replacements = []
+        for change in accepted:
+            if previous.content.count(change.original_text) != 1:
+                raise ValueError("A proposed change no longer matches the source posting")
+            start = previous.content.index(change.original_text)
+            end = start + len(change.original_text)
+            if (
+                not change.replacement_text
+                and start > 0
+                and end < len(previous.content)
+                and previous.content[start - 1] == " "
+                and previous.content[end] == " "
+            ):
+                end += 1
+            replacements.append((start, end, change.replacement_text))
+        replacements.sort()
+        revised_parts = []
+        cursor = 0
+        for start, end, replacement in replacements:
+            revised_parts.extend((previous.content[cursor:start], replacement))
+            cursor = end
+        revised_parts.append(previous.content[cursor:])
+        latest_version_number = (
+            await db.scalar(
+                select(func.max(PostingVersion.version)).where(
+                    PostingVersion.posting_id == session.posting_id
+                )
             )
-            session.status = ComplianceSessionStatus.QUEUED.value
-            session.current_question = None
-        else:
-            session.status = ComplianceSessionStatus.WAITING_FOR_INFORMATION.value
-            session.current_question = "What should the agent change about the proposed revision?"
+            or 0
+        )
+        selected_revision = PostingVersion(
+            posting_id=session.posting_id,
+            version=latest_version_number + 1,
+            content="".join(revised_parts),
+            source="agent",
+            approved_at=utc_now(),
+        )
+        db.add(selected_revision)
+        await db.flush()
+        for change in accepted:
+            change.to_posting_version_id = selected_revision.id
+        session.current_posting_version_id = selected_revision.id
+        session.current_posting_version = selected_revision
+    else:
+        session.current_posting_version_id = previous_id
+        session.current_posting_version = previous
+
+    if rejected:
+        await add_step(
+            db,
+            session.id,
+            kind="user_message",
+            name="Recruiter reviewed proposed changes",
+            input_data={
+                "rejected_changes": [
+                    {
+                        "original_text": change.original_text,
+                        "replacement_text": change.replacement_text,
+                    }
+                    for change in rejected
+                ],
+                "notes": notes,
+            },
+        )
+    session.current_question = None
+    session.status = ComplianceSessionStatus.QUEUED.value
     await db.commit()
 
 
-async def record_user_message(
-    db: AsyncSession,
-    session_id: str,
-    *,
-    base_version_id: str,
-    message: str,
-) -> None:
-    session = await _lock_session(db, session_id)
-    if session.status != ComplianceSessionStatus.WAITING_FOR_INFORMATION.value:
-        raise ValueError("The agent is not waiting for recruiter information")
-    _validate_current_base(session, base_version_id)
+async def record_user_message(db: AsyncSession, session: ComplianceSession, message: str) -> None:
     await add_step(
         db,
         session.id,
@@ -516,16 +395,17 @@ async def add_human_review(
     db: AsyncSession,
     session: ComplianceSession,
     *,
-    base_version_id: str,
     reviewer_name: str,
     decision: str,
     notes: str | None,
     precedent: tuple[ComplianceFinding, str] | None = None,
 ) -> HumanReview:
-    session = await _lock_session(db, session.id)
-    if session.status != ComplianceSessionStatus.NEEDS_REVIEW.value:
+    status_statement = select(ComplianceSession.status).where(ComplianceSession.id == session.id)
+    if db.bind and db.bind.dialect.name == "postgresql":
+        status_statement = status_statement.with_for_update()
+    current_status = await db.scalar(status_statement)
+    if current_status != ComplianceSessionStatus.NEEDS_REVIEW.value:
         raise ValueError("Session does not require human review")
-    _validate_current_base(session, base_version_id)
     findings = await findings_for_session(
         db,
         session.id,
@@ -566,7 +446,7 @@ async def add_human_review(
         session.status = ComplianceSessionStatus.WAITING_FOR_INFORMATION.value
         session.current_question = notes or "What should change before this posting is approved?"
     else:
-        session.status = ComplianceSessionStatus.REJECTED.value
+        session.status = ComplianceSessionStatus.FAILED.value
         session.error_message = notes or "A reviewer rejected this posting."
     await db.commit()
     return review
@@ -589,7 +469,7 @@ async def validate_publishable(db: AsyncSession, session: ComplianceSession) -> 
         jurisdictions=jurisdictions,
         employment_type=session.posting.employment_type,
         platform=session.posting.platform,
-        at=session.started_at or session.created_at,
+        at=session.created_at,
     )
     if not policies:
         raise ValueError("No applicable policies were found")
@@ -613,16 +493,10 @@ async def validate_publishable(db: AsyncSession, session: ComplianceSession) -> 
 
 
 async def publish_posting(
-    db: AsyncSession,
-    session_id: str,
-    *,
-    base_version_id: str,
-    publisher_name: str,
+    db: AsyncSession, session: ComplianceSession, publisher_name: str
 ) -> None:
-    session = await _lock_session(db, session_id)
     if session.status != ComplianceSessionStatus.READY_TO_PUBLISH.value:
         raise ValueError("Only a ready posting can be published")
-    _validate_current_base(session, base_version_id)
     await validate_publishable(db, session)
     await add_step(
         db,

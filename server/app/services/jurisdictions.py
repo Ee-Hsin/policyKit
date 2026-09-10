@@ -87,6 +87,8 @@ def _resolve_alias(value: str) -> str | None:
 def normalize_location(location: str) -> str:
     normalized = re.sub(r"\s+", " ", location.strip().lower())
     code = location.strip().upper()
+    if code in {"US", "GB", "CA"}:
+        return code
     state_code = re.fullmatch(r"US-([A-Z]{2})", code)
     if state_code and state_code.group(1) in US_STATE_CODE_SET:
         return code

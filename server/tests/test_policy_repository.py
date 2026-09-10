@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.entities import PolicyStatus
 from app.repositories import policies as repository
-from app.schemas.policies import PolicyCreate, PolicyDraftUpdate
+from app.schemas.policies import PolicyCategory, PolicyCreate, PolicyDraftUpdate
 
 
 def policy_create(
@@ -105,7 +105,7 @@ async def test_new_snapshot_includes_every_currently_published_policy(
         ).model_copy(
             update={
                 "title": "Age-related language",
-                "category": "discrimination",
+                "category": PolicyCategory.DISCRIMINATION,
                 "jurisdictions": ["GLOBAL"],
             }
         ),
