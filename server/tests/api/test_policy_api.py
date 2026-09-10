@@ -243,10 +243,112 @@ async def test_session_approval_and_publish_endpoints_enforce_state(
 
     publication = await api_client.post(
         f"/api/v1/compliance-sessions/{session_id}/publish",
-        json={"publisher_name": "Test recruiter"},
+        json={
+            "publisher_name": "Test recruiter",
+            "override_reason": "Publish before the review finishes.",
+        },
     )
     assert publication.status_code == 409
-    assert publication.json()["detail"] == "Only a ready posting can be published"
+    assert publication.json()["detail"] == (
+        "Wait for the current review step to finish before publishing"
+    )
+
+
+async def test_publication_override_requires_and_records_an_explanation(
+    api_client: httpx.AsyncClient,
+    db: AsyncSession,
+    monkeypatch,
+) -> None:
+    await create_and_publish_policy(api_client, monkeypatch)
+    created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
+    session_id = created.json()["id"]
+    session = await session_repository.get_session(db, session_id)
+    session.status = ComplianceSessionStatus.NEEDS_REVIEW.value
+    session.error_message = "The policy result requires human judgment."
+    await db.commit()
+
+    missing_reason = await api_client.post(
+        f"/api/v1/compliance-sessions/{session_id}/publish",
+        json={"publisher_name": "Test recruiter"},
+    )
+    assert missing_reason.status_code == 409
+    assert missing_reason.json()["detail"] == (
+        "Explain why you are overriding the PolicyKit review"
+    )
+
+    response = await api_client.post(
+        f"/api/v1/compliance-sessions/{session_id}/publish",
+        json={
+            "publisher_name": "Test recruiter",
+            "override_reason": "  A policy reviewer approved this exception.  ",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == ComplianceSessionStatus.PUBLISHED.value
+    assert payload["steps"][-1]["output_data"] == {
+        "publisher_name": "Test recruiter",
+        "overrode_review": True,
+        "override_reason": "A policy reviewer approved this exception.",
+    }
+
+
+async def test_publication_override_does_not_publish_an_unapproved_agent_revision(
+    api_client: httpx.AsyncClient,
+    db: AsyncSession,
+    monkeypatch,
+) -> None:
+    await create_and_publish_policy(api_client, monkeypatch)
+    created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
+    session_id = created.json()["id"]
+    session = await session_repository.get_session(db, session_id)
+    snapshot = await policy_repository.get_snapshot(db, session.policy_snapshot_id)
+    policy_version_id = snapshot.items[0].policy_version_id
+    await session_repository.replace_findings(
+        db,
+        session,
+        [
+            PolicyAssessment(
+                policy_id=policy_version_id,
+                status=FindingStatus.VIOLATION,
+                evidence_text="Python services",
+                evidence_start=15,
+                evidence_end=30,
+                reason="The posting contains an age preference.",
+            )
+        ],
+    )
+    await session_repository.create_proposed_revision(
+        db,
+        session,
+        ProposedRevision(
+            revised_text="Build reliable services for our learning platform and customers.",
+            changes=[
+                {
+                    "original_text": "Python services",
+                    "replacement_text": "services",
+                    "reason": "Remove the unsupported preference.",
+                    "policy_keys": ["GLOBAL_AGE_001"],
+                }
+            ],
+        ),
+    )
+
+    response = await api_client.post(
+        f"/api/v1/compliance-sessions/{session_id}/publish",
+        json={
+            "publisher_name": "Test recruiter",
+            "override_reason": "The original wording is required for this role.",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == ComplianceSessionStatus.PUBLISHED.value
+    assert payload["current_posting_version"]["source"] == "user"
+    assert payload["current_posting_version"]["content"] == SESSION_REQUEST["job_description"]
+    assert payload["proposed_changes"][0]["status"] == "proposed"
 
 
 async def test_message_response_includes_the_recorded_user_step(
@@ -389,7 +491,10 @@ async def test_publish_response_includes_the_publication_step(
     payload = response.json()
     assert payload["status"] == ComplianceSessionStatus.PUBLISHED.value
     assert payload["steps"][-1]["kind"] == "publication"
-    assert payload["steps"][-1]["output_data"] == {"publisher_name": "Test recruiter"}
+    assert payload["steps"][-1]["output_data"] == {
+        "publisher_name": "Test recruiter",
+        "overrode_review": False,
+    }
 
 
 async def test_reviewer_cannot_approve_an_unchecked_escalated_session(

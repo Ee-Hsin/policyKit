@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.policies import EmploymentType, PolicyPlatform
 
@@ -33,6 +33,14 @@ class RevisionApproval(BaseModel):
 
 class PublishPostingRequest(BaseModel):
     publisher_name: str = Field(default="Demo recruiter", min_length=2, max_length=160)
+    override_reason: str | None = Field(default=None, max_length=2_000)
+
+    @field_validator("override_reason")
+    @classmethod
+    def normalize_override_reason(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
 
 
 class AgentStepRead(BaseModel):

@@ -493,17 +493,62 @@ async def validate_publishable(db: AsyncSession, session: ComplianceSession) -> 
 
 
 async def publish_posting(
-    db: AsyncSession, session: ComplianceSession, publisher_name: str
+    db: AsyncSession,
+    session: ComplianceSession,
+    publisher_name: str,
+    *,
+    override_reason: str | None = None,
 ) -> None:
-    if session.status != ComplianceSessionStatus.READY_TO_PUBLISH.value:
-        raise ValueError("Only a ready posting can be published")
-    await validate_publishable(db, session)
+    override_reason = override_reason.strip() if override_reason else None
+    if session.status == ComplianceSessionStatus.PUBLISHED.value:
+        raise ValueError("This posting has already been published")
+
+    overrode_review = session.status != ComplianceSessionStatus.READY_TO_PUBLISH.value
+    if overrode_review:
+        overridable_statuses = {
+            ComplianceSessionStatus.WAITING_FOR_INFORMATION.value,
+            ComplianceSessionStatus.WAITING_FOR_APPROVAL.value,
+            ComplianceSessionStatus.NEEDS_REVIEW.value,
+            ComplianceSessionStatus.FAILED.value,
+        }
+        if session.status not in overridable_statuses:
+            raise ValueError("Wait for the current review step to finish before publishing")
+        if not override_reason:
+            raise ValueError("Explain why you are overriding the PolicyKit review")
+
+        if (
+            session.current_posting_version.source == "agent"
+            and session.current_posting_version.approved_at is None
+        ):
+            changes = await proposed_changes_for_session(db, session.id)
+            source_ids = {
+                change.from_posting_version_id
+                for change in changes
+                if change.status == ChangeStatus.PROPOSED.value
+                and change.to_posting_version_id == session.current_posting_version_id
+            }
+            if len(source_ids) != 1:
+                raise ValueError("The recruiter draft for this proposed revision is unavailable")
+            source = await db.get(PostingVersion, source_ids.pop())
+            if not source:
+                raise ValueError("The recruiter draft for this proposed revision is unavailable")
+            session.current_posting_version_id = source.id
+            session.current_posting_version = source
+    else:
+        await validate_publishable(db, session)
+
+    publication_data = {
+        "publisher_name": publisher_name,
+        "overrode_review": overrode_review,
+    }
+    if overrode_review:
+        publication_data["override_reason"] = override_reason
     await add_step(
         db,
         session.id,
         kind="publication",
         name="Posting published",
-        output_data={"publisher_name": publisher_name},
+        output_data=publication_data,
     )
     session.status = ComplianceSessionStatus.PUBLISHED.value
     session.completed_at = utc_now()

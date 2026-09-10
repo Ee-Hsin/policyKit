@@ -183,7 +183,12 @@ async def publish_posting(
 ) -> ComplianceSessionRead:
     try:
         session = await repository.get_session(db, session_id)
-        await repository.publish_posting(db, session, request.publisher_name)
+        await repository.publish_posting(
+            db,
+            session,
+            request.publisher_name,
+            override_reason=request.override_reason,
+        )
         return await session_response(db, await repository.get_session(db, session_id))
     except (repository.SessionNotFoundError, ValueError) as error:
         raise session_error(error) from error

@@ -142,6 +142,7 @@ function ReviewPanel({
 }) {
   const [message, setMessage] = useState("");
   const [notes, setNotes] = useState("");
+  const [overrideReason, setOverrideReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -165,6 +166,7 @@ function ReviewPanel({
       onUpdate(await action());
       setMessage("");
       setNotes("");
+      setOverrideReason("");
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : "The action could not be completed.");
     } finally {
@@ -177,10 +179,21 @@ function ReviewPanel({
     void run(() => answerSession(session.id, message));
   }
 
+  function submitOverride(event: FormEvent) {
+    event.preventDefault();
+    void run(() => publishSession(session.id, overrideReason));
+  }
+
   const activeChanges = session.proposed_changes.filter((change) => change.status === "proposed");
   const reviewedChanges = activeChanges.filter((change) => decisions[change.id]);
   const rejectedChanges = activeChanges.filter((change) => decisions[change.id] === "rejected");
   const allChangesReviewed = reviewedChanges.length === activeChanges.length;
+  const canOverridePublication = ([
+    "waiting_for_information",
+    "waiting_for_approval",
+    "needs_review",
+    "failed",
+  ] as SessionStatus[]).includes(session.status);
   const reviewStarted = (["investigating", "changes_proposed"] as SessionStatus[])
     .includes(session.status);
   const policiesChecked = session.steps.some(
@@ -287,6 +300,31 @@ function ReviewPanel({
         <section className="review-action review-action--warning">
           <h2>{session.status === "failed" ? "Review stopped" : "Human review required"}</h2>
           <p>{session.error_message ?? "The review needs a decision from a person."}</p>
+        </section>
+      ) : null}
+
+      {canOverridePublication ? (
+        <section className="review-action review-action--override">
+          <h2>Publish without clearance</h2>
+          <p>You can publish this draft without resolving the review. Explain why you are overriding the PolicyKit review.</p>
+          <form onSubmit={submitOverride}>
+            <label className="field">
+              <span>Override explanation</span>
+              <textarea
+                required
+                maxLength={2000}
+                value={overrideReason}
+                onChange={(event) => setOverrideReason(event.target.value)}
+                placeholder="Explain why this posting should be published…"
+              />
+            </label>
+            <button
+              className="button button--primary button--full"
+              disabled={busy || !overrideReason.trim()}
+            >
+              {busy ? "Publishing…" : "Publish with override"}
+            </button>
+          </form>
         </section>
       ) : null}
 

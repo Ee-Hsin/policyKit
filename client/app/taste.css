@@ -898,6 +898,10 @@ body {
   background: var(--amber-soft);
 }
 
+.review-action--override {
+  border-top: 1px solid var(--line);
+}
+
 .policy-results {
   padding: clamp(24px, 2vw, 30px);
 }

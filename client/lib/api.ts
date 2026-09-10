@@ -90,10 +90,13 @@ export function approveRevision(
   });
 }
 
-export function publishSession(id: string) {
+export function publishSession(id: string, overrideReason?: string) {
   return request<ComplianceSession>(`/compliance-sessions/${id}/publish`, {
     method: "POST",
-    body: JSON.stringify({ publisher_name: "Demo recruiter" }),
+    body: JSON.stringify({
+      publisher_name: "Demo recruiter",
+      override_reason: overrideReason || null,
+    }),
   });
 }
 
