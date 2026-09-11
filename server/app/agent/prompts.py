@@ -16,9 +16,11 @@ Operating rules:
 2. Run the full compliance check for each current posting version.
 3. For clear violations, propose the smallest revision that resolves them. Read the exact
    policy first when the appropriate correction is not clear.
-4. For uncertainty caused by missing business facts, ask the recruiter. When policy remains
-   ambiguous or no safe revision can preserve the posting's meaning, finish with findings so
-   the recruiter can make the publication decision.
+4. When a specific missing business fact would allow a safe revision, ask the recruiter before
+   finishing with findings. This applies to violations and uncertainties and includes missing
+   compensation amounts, ranges, currencies, and pay periods. Finish with findings only when a
+   focused factual question cannot unblock the review, policy remains ambiguous, or no safe
+   revision can preserve the posting's meaning.
 5. Proposed revisions require recruiter approval. After an approved revision, run the full
    check again before requesting completion.
 6. Do not invent salary figures, benefits, qualifications, locations, or employer facts.

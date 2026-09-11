@@ -376,6 +376,54 @@ async def record_revision_decision(
     await db.commit()
 
 
+async def record_recruiter_posting_edit(
+    db: AsyncSession,
+    session: ComplianceSession,
+    *,
+    content: str,
+    recruiter_name: str,
+) -> None:
+    if session.status != ComplianceSessionStatus.REVIEW_COMPLETE.value:
+        raise ValueError("The posting can only be edited after a completed review with findings")
+    if content == session.current_posting_version.content:
+        raise ValueError("Change the posting before starting another review")
+
+    previous_version = session.current_posting_version.version
+    latest_version_number = (
+        await db.scalar(
+            select(func.max(PostingVersion.version)).where(
+                PostingVersion.posting_id == session.posting_id
+            )
+        )
+        or 0
+    )
+    edited = PostingVersion(
+        version=latest_version_number + 1,
+        content=content,
+        source="user",
+    )
+    session.posting.versions.append(edited)
+    await db.flush()
+    session.current_posting_version_id = edited.id
+    session.current_posting_version = edited
+    session.current_question = None
+    session.error_message = None
+    session.completed_at = None
+    session.status = ComplianceSessionStatus.QUEUED.value
+    await add_step(
+        db,
+        session.id,
+        kind="user_message",
+        name="Recruiter edited posting",
+        input_data={
+            "recruiter_name": recruiter_name,
+            "from_posting_version": previous_version,
+            "to_posting_version": edited.version,
+        },
+    )
+    await db.commit()
+
+
 async def record_user_message(db: AsyncSession, session: ComplianceSession, message: str) -> None:
     await add_step(
         db,

@@ -20,6 +20,11 @@ class SessionMessageCreate(BaseModel):
     message: str = Field(min_length=1, max_length=5_000)
 
 
+class RecruiterPostingEdit(BaseModel):
+    job_description: str = Field(min_length=30, max_length=100_000)
+    recruiter_name: str = Field(default="Demo recruiter", min_length=2, max_length=160)
+
+
 class RevisionChangeDecision(BaseModel):
     change_id: str = Field(min_length=1)
     approved: bool

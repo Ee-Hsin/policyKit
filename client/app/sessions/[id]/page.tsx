@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -8,6 +8,7 @@ import {
   ApiError,
   answerSession,
   approveRevision,
+  editSessionPosting,
   getSession,
   publishSession,
 } from "@/lib/api";
@@ -21,6 +22,13 @@ const runningStatuses = new Set<SessionStatus>([
   "queued",
   "investigating",
   "changes_proposed",
+]);
+
+const overrideStatuses = new Set<SessionStatus>([
+  "waiting_for_information",
+  "waiting_for_approval",
+  "review_complete",
+  "failed",
 ]);
 
 const activityLabels: Record<string, string> = {
@@ -129,6 +137,155 @@ function ProposedChanges({
   );
 }
 
+function PublicationActions({
+  session,
+  unresolvedCount,
+  onEdit,
+  onUpdate,
+}: {
+  session: ComplianceSession;
+  unresolvedCount: number;
+  onEdit: () => void;
+  onUpdate: (next: ComplianceSession) => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [overrideReason, setOverrideReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const canOverride = overrideStatuses.has(session.status);
+  const canPublish = session.status === "ready_to_publish";
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog || !modalOpen) return;
+    dialog.showModal();
+    document.body.classList.add("modal-open");
+    return () => {
+      document.body.classList.remove("modal-open");
+      if (dialog.open) dialog.close();
+    };
+  }, [modalOpen]);
+
+  useEffect(() => {
+    if (!canOverride) setModalOpen(false);
+  }, [canOverride]);
+
+  async function publish(overrideReason?: string) {
+    setBusy(true);
+    setError("");
+    try {
+      onUpdate(await publishSession(session.id, overrideReason));
+      setOverrideReason("");
+      setModalOpen(false);
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : "The posting could not be published.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function submitOverride(event: FormEvent) {
+    event.preventDefault();
+    void publish(overrideReason);
+  }
+
+  if (!canOverride && !canPublish) return null;
+
+  return (
+    <div className="session-header__actions">
+      <div className="session-header__button-row">
+        {session.status === "review_complete" ? (
+          <button className="button button--secondary" onClick={onEdit} type="button">
+            Edit posting
+          </button>
+        ) : null}
+        {canPublish ? (
+          <button
+            className="button button--primary"
+            disabled={busy}
+            onClick={() => void publish()}
+            type="button"
+          >
+            {busy ? "Publishing…" : "Publish posting"}
+          </button>
+        ) : (
+          <button
+            className="button button--danger"
+            onClick={() => {
+              setError("");
+              setModalOpen(true);
+            }}
+            type="button"
+          >
+            Publish with override
+          </button>
+        )}
+      </div>
+      {error && !modalOpen ? <div className="alert alert--error" role="alert">{error}</div> : null}
+
+      <dialog
+        className="override-dialog"
+        onCancel={(event) => {
+          event.preventDefault();
+          if (!busy) setModalOpen(false);
+        }}
+        ref={dialogRef}
+      >
+        <div className="override-dialog__heading">
+          <h2>Publish with override?</h2>
+          <button
+            aria-label="Close publication override"
+            className="override-dialog__close"
+            disabled={busy}
+            onClick={() => setModalOpen(false)}
+            type="button"
+          >
+            ×
+          </button>
+        </div>
+
+        <p className="override-dialog__intro">
+          {unresolvedCount
+            ? `This posting has ${unresolvedCount} unresolved ${unresolvedCount === 1 ? "finding" : "findings"}.`
+            : "PolicyKit did not clear this posting."}
+        </p>
+
+        <form onSubmit={submitOverride}>
+          <label className="field">
+            <span>Reason for override</span>
+            <textarea
+              autoFocus
+              maxLength={2000}
+              onChange={(event) => setOverrideReason(event.target.value)}
+              required
+              value={overrideReason}
+            />
+          </label>
+          {error ? <div className="alert alert--error" role="alert">{error}</div> : null}
+          <div className="override-dialog__actions">
+            <button
+              className="button button--secondary"
+              disabled={busy}
+              onClick={() => setModalOpen(false)}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="button button--danger"
+              disabled={busy || !overrideReason.trim()}
+              type="submit"
+            >
+              {busy ? "Publishing…" : "Publish with override"}
+            </button>
+          </div>
+        </form>
+      </dialog>
+    </div>
+  );
+}
+
 function ReviewPanel({
   session,
   decisions,
@@ -140,7 +297,6 @@ function ReviewPanel({
 }) {
   const [message, setMessage] = useState("");
   const [notes, setNotes] = useState("");
-  const [overrideReason, setOverrideReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -164,7 +320,6 @@ function ReviewPanel({
       onUpdate(await action());
       setMessage("");
       setNotes("");
-      setOverrideReason("");
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : "The action could not be completed.");
     } finally {
@@ -177,21 +332,10 @@ function ReviewPanel({
     void run(() => answerSession(session.id, message));
   }
 
-  function submitOverride(event: FormEvent) {
-    event.preventDefault();
-    void run(() => publishSession(session.id, overrideReason));
-  }
-
   const activeChanges = session.proposed_changes.filter((change) => change.status === "proposed");
   const reviewedChanges = activeChanges.filter((change) => decisions[change.id]);
   const rejectedChanges = activeChanges.filter((change) => decisions[change.id] === "rejected");
   const allChangesReviewed = reviewedChanges.length === activeChanges.length;
-  const canOverridePublication = ([
-    "waiting_for_information",
-    "waiting_for_approval",
-    "review_complete",
-    "failed",
-  ] as SessionStatus[]).includes(session.status);
   const reviewStarted = (["investigating", "changes_proposed"] as SessionStatus[])
     .includes(session.status);
   const policiesChecked = session.steps.some(
@@ -280,9 +424,6 @@ function ReviewPanel({
         <section className="review-action review-action--success">
           <h2>Ready to publish</h2>
           <p>No unresolved findings remain.</p>
-          <button className="button button--primary button--full" disabled={busy} onClick={() => void run(() => publishSession(session.id))}>
-            {busy ? "Publishing…" : "Publish posting"}
-          </button>
         </section>
       ) : null}
 
@@ -297,32 +438,7 @@ function ReviewPanel({
       {session.status === "review_complete" || session.status === "failed" ? (
         <section className="review-action review-action--warning">
           <h2>{session.status === "failed" ? "Review stopped" : "Review complete"}</h2>
-          <p>{session.error_message ?? (session.status === "failed" ? "The review could not finish." : "Unresolved findings remain. Review them below or publish with an explanation.")}</p>
-        </section>
-      ) : null}
-
-      {canOverridePublication ? (
-        <section className="review-action review-action--override">
-          <h2>Publish without clearance</h2>
-          <p>You can publish this draft without resolving the review. Explain why you are overriding the PolicyKit review.</p>
-          <form onSubmit={submitOverride}>
-            <label className="field">
-              <span>Override explanation</span>
-              <textarea
-                required
-                maxLength={2000}
-                value={overrideReason}
-                onChange={(event) => setOverrideReason(event.target.value)}
-                placeholder="Explain why this posting should be published…"
-              />
-            </label>
-            <button
-              className="button button--primary button--full"
-              disabled={busy || !overrideReason.trim()}
-            >
-              {busy ? "Publishing…" : "Publish with override"}
-            </button>
-          </form>
+          <p>{session.error_message ?? (session.status === "failed" ? "The review could not finish." : "Unresolved findings remain. Edit the posting or publish with an override.")}</p>
         </section>
       ) : null}
 
@@ -386,6 +502,13 @@ export default function SessionPage() {
   const [session, setSession] = useState<ComplianceSession | null>(null);
   const [error, setError] = useState("");
   const [changeDecisions, setChangeDecisions] = useState<Record<string, ChangeDecision>>({});
+  const documentRef = useRef<HTMLDivElement>(null);
+  const reviewColumnRef = useRef<HTMLDivElement>(null);
+  const [postingIsSticky, setPostingIsSticky] = useState(false);
+  const [editingPosting, setEditingPosting] = useState(false);
+  const [editedPosting, setEditedPosting] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -409,6 +532,37 @@ export default function SessionPage() {
     };
   }, [id]);
 
+  useEffect(() => {
+    if (!session) {
+      setPostingIsSticky(false);
+      return;
+    }
+    const documentElement = documentRef.current;
+    const reviewColumnElement = reviewColumnRef.current;
+    if (!documentElement || !reviewColumnElement) return;
+
+    const updateStickyState = () => {
+      const documentHeight = documentElement.getBoundingClientRect().height;
+      const reviewColumnHeight = reviewColumnElement.getBoundingClientRect().height;
+      const availableHeight = window.innerHeight - 112;
+      setPostingIsSticky(
+        window.innerWidth > 1050 &&
+        documentHeight < reviewColumnHeight &&
+        documentHeight <= availableHeight,
+      );
+    };
+
+    const observer = new ResizeObserver(updateStickyState);
+    observer.observe(documentElement);
+    observer.observe(reviewColumnElement);
+    window.addEventListener("resize", updateStickyState);
+    updateStickyState();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateStickyState);
+    };
+  }, [session?.id]);
+
   const sortedFindings = useMemo(
     () =>
       session
@@ -419,6 +573,36 @@ export default function SessionPage() {
         : [],
     [session],
   );
+
+  function startPostingEdit() {
+    if (!session) return;
+    setEditedPosting(session.current_posting_version.content);
+    setEditError("");
+    setEditingPosting(true);
+  }
+
+  function cancelPostingEdit() {
+    setEditingPosting(false);
+    setEditedPosting("");
+    setEditError("");
+  }
+
+  async function submitPostingEdit(event: FormEvent) {
+    event.preventDefault();
+    if (!session) return;
+    setEditBusy(true);
+    setEditError("");
+    try {
+      setSession(await editSessionPosting(session.id, editedPosting));
+      setChangeDecisions({});
+      setEditingPosting(false);
+      setEditedPosting("");
+    } catch (cause) {
+      setEditError(cause instanceof ApiError ? cause.message : "The posting could not be updated.");
+    } finally {
+      setEditBusy(false);
+    }
+  }
 
   if (error && !session) {
     return (
@@ -487,7 +671,7 @@ export default function SessionPage() {
   return (
     <div className="workspace-shell session-page">
       <header className="session-header">
-        <div>
+        <div className="session-header__content">
           <Link className="back-link" href="/">← New review</Link>
           <h1>{session.title}</h1>
           <p>
@@ -498,73 +682,128 @@ export default function SessionPage() {
             {labelize(session.employment_type)}
           </p>
         </div>
+        {!editingPosting ? (
+          <PublicationActions
+            onEdit={startPostingEdit}
+            onUpdate={setSession}
+            session={session}
+            unresolvedCount={activeFindings.length}
+          />
+        ) : null}
       </header>
 
       <div className="session-grid">
-        <div className="session-document">
+        <div
+          className={`session-document${postingIsSticky ? " session-document--sticky" : ""}`}
+          ref={documentRef}
+        >
           <section className="posting-panel">
-            <h2 className="sr-only">{reviewingChanges ? "Flagged posting" : "Current posting"}</h2>
+            <h2 className="sr-only">
+              {editingPosting ? "Edit posting" : reviewingChanges ? "Flagged posting" : "Current posting"}
+            </h2>
             <div className="posting-toolbar">
               <span className="posting-toolbar__label">
-                {reviewingChanges ? "Flagged posting" : "Current posting"}
+                {editingPosting ? "Edit posting" : reviewingChanges ? "Flagged posting" : "Current posting"}
               </span>
               <div className="version-chip">
-                {reviewingChanges || displayedPosting.source !== "agent" ? "Original" : "Draft"}
+                {editingPosting
+                  ? "Recruiter draft"
+                  : reviewingChanges || displayedPosting.source !== "agent"
+                    ? "Original"
+                    : "Draft"}
               </div>
             </div>
-            <AnnotatedPosting content={displayedPosting.content} findings={activeFindings} />
+            {editingPosting ? (
+              <form className="posting-edit-form" onSubmit={submitPostingEdit}>
+                <label className="sr-only" htmlFor="posting-edit-content">Job posting</label>
+                <textarea
+                  id="posting-edit-content"
+                  maxLength={100000}
+                  minLength={30}
+                  onChange={(event) => setEditedPosting(event.target.value)}
+                  required
+                  value={editedPosting}
+                />
+                {editError ? <div className="alert alert--error" role="alert">{editError}</div> : null}
+                <div className="posting-edit-form__actions">
+                  <button
+                    className="button button--secondary"
+                    disabled={editBusy}
+                    onClick={cancelPostingEdit}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="button button--primary"
+                    disabled={
+                      editBusy ||
+                      editedPosting.length < 30 ||
+                      editedPosting === session.current_posting_version.content
+                    }
+                    type="submit"
+                  >
+                    {editBusy ? "Saving…" : "Save and recheck"}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <AnnotatedPosting content={displayedPosting.content} findings={activeFindings} />
+            )}
           </section>
 
         </div>
 
-        <aside className="session-sidebar">
+        <div className="session-review-column" ref={reviewColumnRef}>
           <ReviewPanel session={session} decisions={changeDecisions} onUpdate={setSession} />
 
-          {!reviewIsRunning ? <section className="policy-results" aria-labelledby="policy-results-heading">
-            <div className="policy-results__heading">
-              <h2 id="policy-results-heading">
-                {activeFindings.length ? "Issues found" : "Policy results"}
-              </h2>
-              {session.findings.length || activeFindings.length ? (
-                <span>{reviewingChanges ? `${activeFindings.length} found` : `${session.findings.length} checked`}</span>
-              ) : null}
-            </div>
-
-            {activeFindings.length ? (
-              <div className="policy-result-list">
-                {activeFindings.map((finding) => (
-                  <article className={`policy-result policy-result--${finding.status}`} key={finding.id}>
-                    {finding.policy_title ? <h3>{finding.policy_title}</h3> : null}
-                    <p>{finding.reason}</p>
-                    {finding.evidence_text ? (
-                      <details>
-                        <summary>View flagged text</summary>
-                        <blockquote>“{finding.evidence_text}”</blockquote>
-                      </details>
-                    ) : null}
-                  </article>
-                ))}
+          <aside className="session-sidebar">
+            {!reviewIsRunning ? <section className="policy-results" aria-labelledby="policy-results-heading">
+              <div className="policy-results__heading">
+                <h2 id="policy-results-heading">
+                  {activeFindings.length ? "Issues found" : "Policy results"}
+                </h2>
+                {session.findings.length || activeFindings.length ? (
+                  <span>{reviewingChanges ? `${activeFindings.length} found` : `${session.findings.length} checked`}</span>
+                ) : null}
               </div>
-            ) : (
-              <p className="policy-results__empty">
-                {session.findings.length
-                  ? `${session.findings.length} policies passed.`
-                  : "Results will appear when the review is complete."}
-              </p>
-            )}
-          </section> : null}
 
-          {reviewingChanges && activeChanges.length ? (
-            <ProposedChanges
-              changes={activeChanges}
-              decisions={changeDecisions}
-              onDecision={(changeId, decision) => setChangeDecisions((current) => ({
-                ...current,
-                [changeId]: decision,
-              }))}
-            />
-          ) : null}
-        </aside>
+              {activeFindings.length ? (
+                <div className="policy-result-list">
+                  {activeFindings.map((finding) => (
+                    <article className={`policy-result policy-result--${finding.status}`} key={finding.id}>
+                      {finding.policy_title ? <h3>{finding.policy_title}</h3> : null}
+                      <p>{finding.reason}</p>
+                      {finding.evidence_text ? (
+                        <details>
+                          <summary>View flagged text</summary>
+                          <blockquote>“{finding.evidence_text}”</blockquote>
+                        </details>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="policy-results__empty">
+                  {session.findings.length
+                    ? `${session.findings.length} policies passed.`
+                    : "Results will appear when the review is complete."}
+                </p>
+              )}
+            </section> : null}
+
+            {reviewingChanges && activeChanges.length ? (
+              <ProposedChanges
+                changes={activeChanges}
+                decisions={changeDecisions}
+                onDecision={(changeId, decision) => setChangeDecisions((current) => ({
+                  ...current,
+                  [changeId]: decision,
+                }))}
+              />
+            ) : null}
+          </aside>
+        </div>
       </div>
     </div>
   );

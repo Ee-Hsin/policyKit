@@ -79,6 +79,16 @@ export function answerSession(id: string, message: string) {
   });
 }
 
+export function editSessionPosting(id: string, jobDescription: string) {
+  return request<ComplianceSession>(`/compliance-sessions/${id}/edit`, {
+    method: "POST",
+    body: JSON.stringify({
+      job_description: jobDescription,
+      recruiter_name: "Demo recruiter",
+    }),
+  });
+}
+
 export function approveRevision(
   id: string,
   decisions: { change_id: string; approved: boolean }[],

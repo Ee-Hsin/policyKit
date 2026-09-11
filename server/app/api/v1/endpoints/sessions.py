@@ -19,6 +19,7 @@ from app.schemas.sessions import (
     PostingVersionRead,
     ProposedChangeRead,
     PublishPostingRequest,
+    RecruiterPostingEdit,
     RevisionApproval,
     SessionListItem,
     SessionMessageCreate,
@@ -133,6 +134,25 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)) -> Co
     try:
         return await session_response(db, await repository.get_session(db, session_id))
     except repository.SessionNotFoundError as error:
+        raise session_error(error) from error
+
+
+@router.post("/{session_id}/edit", response_model=ComplianceSessionRead)
+async def edit_posting(
+    session_id: str,
+    request: RecruiterPostingEdit,
+    db: AsyncSession = Depends(get_db),
+) -> ComplianceSessionRead:
+    try:
+        session = await repository.get_session(db, session_id)
+        await repository.record_recruiter_posting_edit(
+            db,
+            session,
+            content=request.job_description,
+            recruiter_name=request.recruiter_name,
+        )
+        return await session_response(db, await repository.get_session(db, session_id))
+    except (repository.SessionNotFoundError, ValueError) as error:
         raise session_error(error) from error
 
 

@@ -86,7 +86,8 @@ AGENT_TOOLS = [
         "name": "ask_recruiter",
         "description": (
             "Pause and ask one focused question when a fact required for compliance or a safe "
-            "revision is missing."
+            "revision is missing. Use this before finish_with_findings whenever a specific "
+            "recruiter answer could unblock the review."
         ),
         "parameters": {
             "type": "object",
@@ -103,8 +104,9 @@ AGENT_TOOLS = [
         "type": "function",
         "name": "finish_with_findings",
         "description": (
-            "Finish the review with unresolved findings when a safe revision requires a recruiter "
-            "decision, a policy remains ambiguous, or no applicable policy is configured."
+            "Finish the review with unresolved findings only when a focused factual question "
+            "cannot unblock it, a policy remains ambiguous, no safe revision can preserve the "
+            "posting's meaning, or no applicable policy is configured."
         ),
         "parameters": {
             "type": "object",

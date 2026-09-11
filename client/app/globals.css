@@ -43,6 +43,10 @@ body {
   background: var(--paper);
 }
 
+body.modal-open {
+  overflow: hidden;
+}
+
 button,
 input,
 select,
@@ -365,7 +369,7 @@ h3 {
 }
 
 .button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.58;
 }
 
@@ -378,6 +382,17 @@ h3 {
 .button--primary:hover:not(:disabled) {
   background: var(--green-dark);
   box-shadow: 0 9px 22px rgba(23, 33, 31, 0.2);
+}
+
+.button--danger {
+  background: var(--red);
+  box-shadow: 0 6px 16px rgba(162, 58, 53, 0.2);
+  color: white;
+}
+
+.button--danger:hover:not(:disabled) {
+  background: #852f2b;
+  box-shadow: 0 9px 22px rgba(162, 58, 53, 0.24);
 }
 
 .button--secondary {

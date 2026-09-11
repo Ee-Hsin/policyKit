@@ -351,6 +351,64 @@ async def test_message_response_includes_the_recorded_user_step(
     assert payload["steps"][-1]["input_data"] == {"message": "Use New York."}
 
 
+async def test_recruiter_can_edit_a_posting_after_review_finishes_with_findings(
+    api_client: httpx.AsyncClient,
+    db: AsyncSession,
+) -> None:
+    await create_and_publish_policy(api_client)
+    created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
+    session_id = created.json()["id"]
+    session = await session_repository.get_session(db, session_id)
+    session.status = ComplianceSessionStatus.REVIEW_COMPLETE.value
+    await db.commit()
+    edited_content = (
+        "Build reliable Python services for our learning platform and welcome all candidates."
+    )
+
+    response = await api_client.post(
+        f"/api/v1/compliance-sessions/{session_id}/edit",
+        json={
+            "job_description": edited_content,
+            "recruiter_name": "Test recruiter",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == ComplianceSessionStatus.QUEUED.value
+    assert payload["current_posting_version"]["version"] == 2
+    assert payload["current_posting_version"]["source"] == "user"
+    assert payload["current_posting_version"]["content"] == edited_content
+    assert len(payload["posting_versions"]) == 2
+    assert payload["steps"][-1]["name"] == "Recruiter edited posting"
+    assert payload["steps"][-1]["input_data"] == {
+        "recruiter_name": "Test recruiter",
+        "from_posting_version": 1,
+        "to_posting_version": 2,
+    }
+
+
+async def test_recruiter_cannot_edit_a_posting_during_an_active_review(
+    api_client: httpx.AsyncClient,
+) -> None:
+    await create_and_publish_policy(api_client)
+    created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
+    session_id = created.json()["id"]
+
+    response = await api_client.post(
+        f"/api/v1/compliance-sessions/{session_id}/edit",
+        json={
+            "job_description": "Build a changed and reliable service for our learning platform.",
+            "recruiter_name": "Test recruiter",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "The posting can only be edited after a completed review with findings"
+    )
+
+
 async def test_proposed_revision_response_keeps_the_findings_it_addresses(
     api_client: httpx.AsyncClient,
     db: AsyncSession,
