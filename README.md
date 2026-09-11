@@ -36,8 +36,7 @@ flowchart LR
     tools --> db
 ```
 
-Clients communicate with our server which adds policies and sessions to the database. When a new enqueued session is added, a worker acquires a lock on it, picks it up and kick off a review. 
-At a much larger scale, we could use a dedicated message-queue here.
+Clients communicate with our server which adds policies and sessions to the database. When a new enqueued session is added, a worker acquires a lock on it, sets it to investigating, and kicks off a review. We can run many workers if we expect a lot of traffic, and at a much larger scale, we could use a dedicated message-queue here.
 
 There are two model roles:
 
