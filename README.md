@@ -36,18 +36,19 @@ flowchart LR
     tools --> db
 ```
 
-Clients add policies and sessions to the database. When a new enqueued session is added, a worker acquires a lock on it, picks it up and kick off a review. If this was scaled, we would use a traditional message-queue here.
+Clients communicate with our server which adds policies and sessions to the database. When a new enqueued session is added, a worker acquires a lock on it, picks it up and kick off a review. 
+At a much larger scale, we could use a dedicated message-queue here.
 
 There are two model roles:
 
 - The orchestrator model sees the current state of the session and available tools. It chooses one action at a time.
-- The classifier LLM is spawned by the `run_compliance_check` tool call. For every batch of 4 applicable policies, an LLM is spawned and supplied policies, and asked to return an assessment per policy.
+- The classifier LLM is invoked by the `run_compliance_check` tool call. For every batch of applicable policies (4 by default), the system makes a classifier LLM call with those policies supplied, and asked to return an assessment per policy.
 
-Importantly, the agents are driven by the available tools we provide it.
+Importantly, the orchestrator agent is driven by the available tools we provide it. (The classifiers have no access to tools)
 
 ### Agent tools
 
-The orchestrator can receive some/all of these tools, depending on the current state:
+The orchestrator receives a subset of these tools, depending on the current state:
 
 | Tool | Purpose |
 | --- | --- |
@@ -93,6 +94,9 @@ Once the orchestrator calls `complete_session`, we enforce these conditions:
 
 Recruiters can publish a posting with violations via an override publication path, though
 it requires an explanation which we stores in the database.
+
+A recruiter can publish after the current agent step pauses or finishes, even if the review has unresolved findings or has failed.
+However, if we have not cleared the posting, the recruiter must provide an override explanation, which is stored in the database.
 
 ## Policy administration
 
