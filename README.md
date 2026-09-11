@@ -101,10 +101,6 @@ However, if we have not cleared the posting, the recruiter must provide an overr
 
 An administrator can create, test, version, and publish policies from the web interface.
 
-![Versioned policies in the policy library](docs/images/policykit-policy-library.png)
-
-![The compact policy editor](docs/images/policykit-policy-editor.png)
-
 Policy states are:
 
 ```text
