@@ -29,35 +29,38 @@ flowchart LR
     api --> db[("PostgreSQL\nsource of truth")]
     worker["Python agent worker"] -->|Claims queued sessions| db
     worker --> agent["Tool-calling runtime"]
-    agent --> orchestrator["Agent LLM"]
+    agent --> orchestrator["Orchestrator LLM"]
     agent --> tools["State-scoped Python tools"]
     tools --> checker["Full-policy checker"]
     checker --> classifier["Classifier LLM"]
     tools --> db
 ```
 
+Clients add policies and sessions to the database. When a new enqueued session is added, a worker acquires a lock on it, picks it up and kick off a review. If this was scaled, we would use a traditional message-queue here.
+
 There are two model roles:
 
-- The **orchestrator** sees the goal, the current posting, session state, recent activity,
-  and the tools available in that state. It chooses exactly one action at a time.
-- The **classifier** has no tools. Python supplies every applicable policy from the pinned
-  snapshot and requires one structured assessment per policy.
+- The orchestrator model sees the current state of the session and available tools. It chooses one action at a time.
+- The classifier LLM is spawned by the `run_compliance_check` tool call. For every batch of 4 applicable policies, an LLM is spawned and supplied policies, and asked to return an assessment per policy.
 
-This split lets the workflow be agentic without giving the model authority over policy
-scope or publication.
+Importantly, the agents are driven by the available tools we provide it.
 
-## Technology responsibilities
+### Agent tools
 
-| Technology | Responsibility |
+The orchestrator can receive some/all of these tools, depending on the current state:
+
+| Tool | Purpose |
 | --- | --- |
-| Python | Agent runtime, tool permissions, validation, recovery, cache keys, and evals |
-| FastAPI | Recruiter sessions, policy administration, edit decisions, and publication APIs |
-| LLM | Agent tool selection and structured policy assessment |
-| PostgreSQL | Policies, snapshots, posting versions, findings, recruiter decisions, audit steps, and exact cache |
-| Next.js | Recruiter workspace and policy-administration interface |
+| `ask_recruiter` | Pause to ask for a missing business fact |
+| `set_hiring_locations` | Saves a location supplied by the recruiter |
+| `run_compliance_check` | Spawns classifier agents to check every applicable policy |
+| `read_policy` | Loads a specific policy from the database |
+| `propose_revision` | Declare an edit to the draft |
+| `finish_with_findings` | To end the review with findings for recruiter |
+| `complete_session` | Available when no violations, python then runs `validate_publishable` |
 
-PostgreSQL is always authoritative. Python selects every applicable policy from the
-session's pinned snapshot. The classifier must return one result for each selected policy.
+The runtime rejects multiple tool calls in one turn, overlapping edits, edits tied to
+the wrong finding, and changes outside the declared edit set.
 
 ## Session lifecycle
 
@@ -79,67 +82,31 @@ stateDiagram-v2
     failed --> published: Recruiter overrides review
 ```
 
-The audit trail includes tool inputs and outputs, model response IDs, token use, latency,
-evidence, posting versions, exact edits, and recruiter decisions. A periodic worker
-recovery pass returns interrupted sessions to the queue.
+## Publication
 
-## Publication safeguards
-
-`complete_session` and the clean publication path enforce these conditions:
+Once the orchestrator calls `complete_session`, we enforce these conditions:
 
 - Every recruiter location resolves to a supported concrete jurisdiction.
-- The latest posting has one assessment for every applicable policy.
-- Every assessment is `no_violation`.
-- An agent-authored posting version has explicit recruiter approval.
-- The assessment set matches the current posting version and the pinned policy snapshot.
+- The latest posting has a `no_violation` assessment for every applicable policy.
+- An agent-authored posting has explicit recruiter approval.
+- The assessment set matches the current posting version.
 
-The override publication path requires a recruiter explanation and stores it in the audit
-trail. It never publishes an unapproved agent revision. An override can run after the
-current agent step pauses or finishes, which prevents a publication race with the worker.
-
-Policy applicability is evaluated at the session start time. A policy that expires while a
-review is in progress remains part of that review, while new sessions use the current
-policy set. Published policy versions are immutable. PostgreSQL locks serialize policy
-publication so concurrent changes cannot create conflicting snapshots.
+Recruiters can publish a posting with violations via an override publication path, though
+it requires an explanation which we stores in the database.
 
 ## Policy administration
 
 An administrator can create, test, version, and publish policies from the web interface.
-A policy includes its category, canonical scope, enforcement level, rule, remediation,
-exceptions, and both violation and compliant examples. Category is restricted to
-`Discrimination`, `Compensation`, `Employment status`, `Transparency`, or `Content`.
 
 ![Versioned policies in the policy library](docs/images/policykit-policy-library.png)
 
 ![The compact policy editor](docs/images/policykit-policy-editor.png)
-
-Publishing a version retires the prior live version and creates a new immutable snapshot.
-Sessions already in progress keep their original snapshot. Policy and location inputs are
-normalized at the API boundary so free-form strings cannot silently skip a scoped rule.
 
 Policy states are:
 
 ```text
 draft -> testing -> published -> retired
 ```
-
-## Agent tools
-
-The orchestrator can receive these strict tools, depending on the current state:
-
-| Tool | Purpose |
-| --- | --- |
-| `set_hiring_locations` | Save a location supplied by the recruiter |
-| `run_compliance_check` | Check every applicable policy |
-| `read_policy` | Read one canonical policy from the pinned snapshot |
-| `propose_revision` | Declare the smallest supported edits; Python reconstructs the draft |
-| `ask_recruiter` | Pause for a missing business fact |
-| `finish_with_findings` | End the review when findings require a recruiter decision |
-| `complete_session` | Ask Python to apply the clean-check gate |
-
-The runtime rejects unknown tools, tools that were not offered in the current state,
-multiple tool calls in one turn, overlapping edits, non-unique source text, edits tied to
-the wrong finding, and changes outside the declared edit set.
 
 ## Local setup
 
@@ -254,18 +221,5 @@ cd server
 .venv/bin/python -m app.evals.runner --live
 ```
 
-The September 3, 2026 verification run passed all 13 authored cases with 100% assessment
-accuracy, violation recall, and violation precision. The suite covers compliant controls,
-minimal pairs, multi-policy violations, missing pay ranges, uncertainty, illegal work,
-sensitive-data requests, and prompt injection inside untrusted posting text. Model results
-can vary, so the live suite should be rerun after prompt, model, policy, or schema changes.
-
 See [docs/evaluation.md](docs/evaluation.md) for metric definitions and
 [docs/architecture.md](docs/architecture.md) for the detailed data and trust boundaries.
-
-## Production boundary
-
-This repository is a working product prototype. It does not yet include an external
-identity provider or multi-tenant authorization. A production deployment must add
-authenticated recruiter and policy-admin roles at the FastAPI boundary, plus managed
-PostgreSQL, secret management, rate limits, and monitoring.
