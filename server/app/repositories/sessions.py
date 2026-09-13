@@ -383,10 +383,21 @@ async def record_recruiter_posting_edit(
     content: str,
     recruiter_name: str,
 ) -> None:
-    if session.status != ComplianceSessionStatus.REVIEW_COMPLETE.value:
-        raise ValueError("The posting can only be edited after a completed review with findings")
+    editable_statuses = {
+        ComplianceSessionStatus.DRAFT.value,
+        ComplianceSessionStatus.WAITING_FOR_INFORMATION.value,
+        ComplianceSessionStatus.WAITING_FOR_APPROVAL.value,
+        ComplianceSessionStatus.REVIEW_COMPLETE.value,
+    }
+    if session.status not in editable_statuses:
+        raise ValueError("The posting can only be edited while the review is waiting for you")
     if content == session.current_posting_version.content:
-        raise ValueError("Change the posting before starting another review")
+        raise ValueError("Change the posting before saving the draft")
+
+    proposed_changes = await proposed_changes_for_session(db, session.id)
+    for change in proposed_changes:
+        if change.status == ChangeStatus.PROPOSED.value:
+            change.status = ChangeStatus.REJECTED.value
 
     previous_version = session.current_posting_version.version
     latest_version_number = (
@@ -409,7 +420,7 @@ async def record_recruiter_posting_edit(
     session.current_question = None
     session.error_message = None
     session.completed_at = None
-    session.status = ComplianceSessionStatus.QUEUED.value
+    session.status = ComplianceSessionStatus.DRAFT.value
     await add_step(
         db,
         session.id,
@@ -420,6 +431,26 @@ async def record_recruiter_posting_edit(
             "from_posting_version": previous_version,
             "to_posting_version": edited.version,
         },
+    )
+    await db.commit()
+
+
+async def queue_recruiter_posting_review(
+    db: AsyncSession,
+    session: ComplianceSession,
+) -> None:
+    if session.status != ComplianceSessionStatus.DRAFT.value:
+        raise ValueError("Only a saved recruiter draft can start a new review")
+    session.current_question = None
+    session.error_message = None
+    session.completed_at = None
+    session.status = ComplianceSessionStatus.QUEUED.value
+    await add_step(
+        db,
+        session.id,
+        kind="user_message",
+        name="Recruiter requested another review",
+        input_data={"posting_version": session.current_posting_version.version},
     )
     await db.commit()
 

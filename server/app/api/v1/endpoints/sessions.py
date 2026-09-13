@@ -43,6 +43,23 @@ async def session_response(db: AsyncSession, session: ComplianceSession) -> Comp
         )
         if pending_change:
             finding_posting_version_id = pending_change.from_posting_version_id
+    elif session.status == ComplianceSessionStatus.DRAFT.value:
+        previous_versions = sorted(
+            (
+                version
+                for version in session.posting.versions
+                if version.version < session.current_posting_version.version
+            ),
+            key=lambda version: version.version,
+            reverse=True,
+        )
+        for version in previous_versions:
+            prior_findings = await repository.findings_for_session(
+                db, session.id, posting_version_id=version.id
+            )
+            if prior_findings:
+                finding_posting_version_id = version.id
+                break
     findings = await repository.findings_for_session(
         db, session.id, posting_version_id=finding_posting_version_id
     )
@@ -167,6 +184,19 @@ async def answer_agent(
         if session.status != ComplianceSessionStatus.WAITING_FOR_INFORMATION.value:
             raise ValueError("The agent is not waiting for recruiter information")
         await repository.record_user_message(db, session, request.message)
+        return await session_response(db, await repository.get_session(db, session_id))
+    except (repository.SessionNotFoundError, ValueError) as error:
+        raise session_error(error) from error
+
+
+@router.post("/{session_id}/review", response_model=ComplianceSessionRead)
+async def review_edited_posting(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ComplianceSessionRead:
+    try:
+        session = await repository.get_session(db, session_id)
+        await repository.queue_recruiter_posting_review(db, session)
         return await session_response(db, await repository.get_session(db, session_id))
     except (repository.SessionNotFoundError, ValueError) as error:
         raise session_error(error) from error

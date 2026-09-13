@@ -831,6 +831,12 @@ body {
   margin-top: 16px;
 }
 
+.review-action form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .review-action--pending {
   display: block;
 }

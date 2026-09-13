@@ -375,7 +375,7 @@ async def test_recruiter_can_edit_a_posting_after_review_finishes_with_findings(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == ComplianceSessionStatus.QUEUED.value
+    assert payload["status"] == ComplianceSessionStatus.DRAFT.value
     assert payload["current_posting_version"]["version"] == 2
     assert payload["current_posting_version"]["source"] == "user"
     assert payload["current_posting_version"]["content"] == edited_content
@@ -405,8 +405,95 @@ async def test_recruiter_cannot_edit_a_posting_during_an_active_review(
 
     assert response.status_code == 409
     assert response.json()["detail"] == (
-        "The posting can only be edited after a completed review with findings"
+        "The posting can only be edited while the review is waiting for you"
     )
+
+
+async def test_recruiter_edit_replaces_unapproved_agent_changes(
+    api_client: httpx.AsyncClient,
+    db: AsyncSession,
+) -> None:
+    await create_and_publish_policy(api_client)
+    created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
+    session_id = created.json()["id"]
+    session = await session_repository.get_session(db, session_id)
+    snapshot = await policy_repository.get_snapshot(db, session.policy_snapshot_id)
+    policy_version_id = snapshot.items[0].policy_version_id
+    await session_repository.replace_findings(
+        db,
+        session,
+        [
+            PolicyAssessment(
+                policy_id=policy_version_id,
+                status=FindingStatus.VIOLATION,
+                evidence_text="Python services",
+                evidence_start=15,
+                evidence_end=30,
+                reason="The posting contains an age preference.",
+            )
+        ],
+    )
+    await session_repository.create_proposed_revision(
+        db,
+        session,
+        ProposedRevision(
+            revised_text="Build reliable services for our learning platform and customers.",
+            changes=[
+                {
+                    "original_text": "Python services",
+                    "replacement_text": "services",
+                    "reason": "Remove the unsupported preference.",
+                    "policy_keys": ["GLOBAL_AGE_001"],
+                }
+            ],
+        ),
+    )
+    recruiter_edit = (
+        "Build reliable Python services for our learning platform and welcome all applicants."
+    )
+
+    response = await api_client.post(
+        f"/api/v1/compliance-sessions/{session_id}/edit",
+        json={"job_description": recruiter_edit, "recruiter_name": "Test recruiter"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == ComplianceSessionStatus.DRAFT.value
+    assert payload["current_posting_version"]["content"] == recruiter_edit
+    assert payload["current_posting_version"]["source"] == "user"
+    assert payload["proposed_changes"][0]["status"] == "rejected"
+    assert len(payload["findings"]) == 1
+    assert payload["findings"][0]["evidence_text"] == "Python services"
+
+
+async def test_recruiter_starts_review_after_saving_an_edit(
+    api_client: httpx.AsyncClient,
+    db: AsyncSession,
+) -> None:
+    await create_and_publish_policy(api_client)
+    created = await api_client.post("/api/v1/compliance-sessions", json=SESSION_REQUEST)
+    session_id = created.json()["id"]
+    session = await session_repository.get_session(db, session_id)
+    session.status = ComplianceSessionStatus.REVIEW_COMPLETE.value
+    await db.commit()
+    await api_client.post(
+        f"/api/v1/compliance-sessions/{session_id}/edit",
+        json={
+            "job_description": (
+                "Build reliable Python services for our learning platform and welcome candidates."
+            ),
+            "recruiter_name": "Test recruiter",
+        },
+    )
+
+    response = await api_client.post(f"/api/v1/compliance-sessions/{session_id}/review")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == ComplianceSessionStatus.QUEUED.value
+    assert payload["steps"][-1]["name"] == "Recruiter requested another review"
+    assert payload["steps"][-1]["input_data"] == {"posting_version": 2}
 
 
 async def test_proposed_revision_response_keeps_the_findings_it_addresses(

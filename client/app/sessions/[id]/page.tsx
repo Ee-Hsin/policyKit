@@ -11,6 +11,7 @@ import {
   editSessionPosting,
   getSession,
   publishSession,
+  reviewSessionPosting,
 } from "@/lib/api";
 import { labelize } from "@/lib/format";
 import type { ComplianceSession, Finding, SessionStatus } from "@/lib/types";
@@ -18,7 +19,6 @@ import type { ComplianceSession, Finding, SessionStatus } from "@/lib/types";
 type ChangeDecision = "accepted" | "rejected";
 
 const runningStatuses = new Set<SessionStatus>([
-  "draft",
   "queued",
   "investigating",
   "changes_proposed",
@@ -29,6 +29,13 @@ const overrideStatuses = new Set<SessionStatus>([
   "waiting_for_approval",
   "review_complete",
   "failed",
+]);
+
+const editableStatuses = new Set<SessionStatus>([
+  "draft",
+  "waiting_for_information",
+  "waiting_for_approval",
+  "review_complete",
 ]);
 
 const activityLabels: Record<string, string> = {
@@ -155,6 +162,7 @@ function PublicationActions({
   const [error, setError] = useState("");
   const canOverride = overrideStatuses.has(session.status);
   const canPublish = session.status === "ready_to_publish";
+  const canEdit = editableStatuses.has(session.status);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -190,12 +198,12 @@ function PublicationActions({
     void publish(overrideReason);
   }
 
-  if (!canOverride && !canPublish) return null;
+  if (!canOverride && !canPublish && !canEdit) return null;
 
   return (
     <div className="session-header__actions">
       <div className="session-header__button-row">
-        {session.status === "review_complete" ? (
+        {canEdit ? (
           <button className="button button--secondary" onClick={onEdit} type="button">
             Edit posting
           </button>
@@ -427,6 +435,21 @@ function ReviewPanel({
         </section>
       ) : null}
 
+      {session.status === "draft" ? (
+        <section className="review-action">
+          <h2>Edited draft saved</h2>
+          <p>Previous findings are shown for reference. Run a new review when you are ready.</p>
+          <button
+            className="button button--primary button--full"
+            disabled={busy}
+            onClick={() => void run(() => reviewSessionPosting(session.id))}
+            type="button"
+          >
+            {busy ? "Starting…" : "Run review again"}
+          </button>
+        </section>
+      ) : null}
+
       {session.status === "published" ? (
         <section className="review-action review-action--success">
           <h2>Review complete</h2>
@@ -442,11 +465,10 @@ function ReviewPanel({
         </section>
       ) : null}
 
-      {(["draft", "queued", "investigating", "changes_proposed"] as SessionStatus[]).includes(session.status) ? (
+      {(["queued", "investigating", "changes_proposed"] as SessionStatus[]).includes(session.status) ? (
         <section className="review-action review-action--pending" role="status">
-          <h2>{session.status === "draft" ? "Review not started" : session.status === "queued" ? "Review queued" : "Review in progress"}</h2>
-          {session.status !== "draft" ? (
-            <>
+          <h2>{session.status === "queued" ? "Review queued" : "Review in progress"}</h2>
+          <>
               <ol className="review-steps">
                 {progressSteps.map((step) => (
                   <li className={`review-step review-step--${step.state}`} key={step.label}>
@@ -468,9 +490,6 @@ function ReviewPanel({
                 </div>
                 <p className="review-activity__current">{currentActivity}</p>
                 <div className="review-activity__meta">
-                  {session.policy_snapshot_version ? (
-                    <span>Policy set v{session.policy_snapshot_version}</span>
-                  ) : null}
                   <span>{session.steps.length} {session.steps.length === 1 ? "step" : "steps"} recorded</span>
                 </div>
                 {recentActivity.length ? (
@@ -486,8 +505,7 @@ function ReviewPanel({
                   <p className="review-activity__waiting">Completed actions will appear here.</p>
                 )}
               </div>
-            </>
-          ) : null}
+          </>
         </section>
       ) : null}
 
@@ -574,9 +592,8 @@ export default function SessionPage() {
     [session],
   );
 
-  function startPostingEdit() {
-    if (!session) return;
-    setEditedPosting(session.current_posting_version.content);
+  function startPostingEdit(content: string) {
+    setEditedPosting(content);
     setEditError("");
     setEditingPosting(true);
   }
@@ -667,6 +684,23 @@ export default function SessionPage() {
   const activeFindings = returnedActiveFindings.length || !reviewingChanges
     ? returnedActiveFindings
     : findingsFromChanges;
+  const displayedFindings = session.status === "draft"
+    ? activeFindings.map((finding) => {
+        if (!finding.evidence_text) {
+          return { ...finding, evidence_start: null, evidence_end: null };
+        }
+        const start = displayedPosting.content.indexOf(finding.evidence_text);
+        const hasUniqueMatch = start >= 0 && displayedPosting.content.indexOf(
+          finding.evidence_text,
+          start + 1,
+        ) === -1;
+        return {
+          ...finding,
+          evidence_start: hasUniqueMatch ? start : null,
+          evidence_end: hasUniqueMatch ? start + finding.evidence_text.length : null,
+        };
+      })
+    : activeFindings;
 
   return (
     <div className="workspace-shell session-page">
@@ -684,7 +718,7 @@ export default function SessionPage() {
         </div>
         {!editingPosting ? (
           <PublicationActions
-            onEdit={startPostingEdit}
+            onEdit={() => startPostingEdit(displayedPosting.content)}
             onUpdate={setSession}
             session={session}
             unresolvedCount={activeFindings.length}
@@ -739,16 +773,16 @@ export default function SessionPage() {
                     disabled={
                       editBusy ||
                       editedPosting.length < 30 ||
-                      editedPosting === session.current_posting_version.content
+                      editedPosting === displayedPosting.content
                     }
                     type="submit"
                   >
-                    {editBusy ? "Saving…" : "Save and recheck"}
+                    {editBusy ? "Saving…" : "Save edit"}
                   </button>
                 </div>
               </form>
             ) : (
-              <AnnotatedPosting content={displayedPosting.content} findings={activeFindings} />
+              <AnnotatedPosting content={displayedPosting.content} findings={displayedFindings} />
             )}
           </section>
 
@@ -761,10 +795,20 @@ export default function SessionPage() {
             {!reviewIsRunning ? <section className="policy-results" aria-labelledby="policy-results-heading">
               <div className="policy-results__heading">
                 <h2 id="policy-results-heading">
-                  {activeFindings.length ? "Issues found" : "Policy results"}
+                  {session.status === "draft"
+                    ? "Previous findings"
+                    : activeFindings.length
+                      ? "Issues found"
+                      : "Policy results"}
                 </h2>
                 {session.findings.length || activeFindings.length ? (
-                  <span>{reviewingChanges ? `${activeFindings.length} found` : `${session.findings.length} checked`}</span>
+                  <span>
+                    {session.status === "draft"
+                      ? `${activeFindings.length} from last review`
+                      : reviewingChanges
+                        ? `${activeFindings.length} found`
+                        : `${session.findings.length} checked`}
+                  </span>
                 ) : null}
               </div>
 

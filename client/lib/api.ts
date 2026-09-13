@@ -89,6 +89,12 @@ export function editSessionPosting(id: string, jobDescription: string) {
   });
 }
 
+export function reviewSessionPosting(id: string) {
+  return request<ComplianceSession>(`/compliance-sessions/${id}/review`, {
+    method: "POST",
+  });
+}
+
 export function approveRevision(
   id: string,
   decisions: { change_id: string; approved: boolean }[],
