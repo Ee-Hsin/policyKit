@@ -1,17 +1,22 @@
 # PolicyKit
 
-PolicyKit is a pre-publication compliance agent for job postings. It investigates a
-draft, checks the complete applicable policy set, asks for missing facts, proposes exact
-edits, and stops for human approval before publication.
+PolicyKit is a pre-publication review agent that applies company-wide standards and local
+hiring rules to every job posting. It helps recruiting teams present a clear, consistent
+picture of the company across every role, identifies policy issues, suggests revisions,
+and keeps a human in control before publication.
 
 ## What the product does
+
+Administrators define reusable policies that can cover legal obligations, required
+content, terminology, structure, and tone. This gives recruiting teams one review process
+for local compliance and consistent company presentation across every role.
 
 A recruiter enters a job description and additional information such as the hiring
 locations and employment type. PolicyKit then:
 
 1. Determines which policies apply from the information provided.
 2. Checks the posting against every applicable policy.
-3. Highlights problematic text, explains each finding, and proposes exact edits.
+3. Highlights problematic text, explains each finding, and suggests revisions.
 4. Lets the recruiter accept or reject each edit and optionally explain rejected edits.
 5. Applies the accepted edits and checks the revised posting again. Rejected edits and
 recruiter feedback return to the agent for the next review cycle.
@@ -70,7 +75,7 @@ stateDiagram-v2
     queued --> investigating: Worker claims session
     investigating --> waiting_for_information: Required fact is missing
     waiting_for_information --> queued: Recruiter answers
-    investigating --> waiting_for_approval: Agent proposes exact edits
+    investigating --> waiting_for_approval: Agent suggests revisions
     waiting_for_approval --> queued: Recruiter submits edit decisions
     investigating --> review_complete: Findings require a recruiter decision
     investigating --> ready_to_publish: Complete clean check
@@ -100,6 +105,11 @@ However, if we have not cleared the posting, the recruiter must provide an overr
 ## Policy administration
 
 An administrator can create, test, version, and publish policies from the web interface.
+
+Because policies are stored as data rather than hard-coded checks, administrators can use
+the same workflow for local hiring rules and company-wide publishing standards. A global
+policy can, for example, require consistent terminology, sections, or tone across every
+job posting.
 
 Policy states are:
 
